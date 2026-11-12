@@ -115,10 +115,15 @@ function Extras({ status }: { status: any }) {
       <div className="rounded-2xl bg-gradient-to-br from-emerald-500/10 to-brand-500/5 p-6 text-center ring-1 ring-emerald-500/20">
         <PartyPopper className="mx-auto size-8 text-emerald-500" />
         <h3 className="mt-2 font-semibold">Ready to list!</h3>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">Pick Shopify products and turn them into eBay listings in a few clicks.</p>
-        <Link to="/products" className="btn-primary mt-4">
-          Go to Shopify products
-        </Link>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">First run a quick catalog check (SKUs, barcodes, stock tracking), then pick products to list on eBay.</p>
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
+          <Link to="/catalog" className="btn-primary">
+            Check catalog health
+          </Link>
+          <Link to="/products" className="btn-secondary">
+            Go to Shopify products
+          </Link>
+        </div>
       </div>
     </div>
   );

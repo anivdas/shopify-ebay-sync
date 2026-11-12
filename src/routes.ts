@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import * as catalog from './catalog.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
 import { all, get, getSettings, getState, json, setState, updateSettings } from './db.ts';
@@ -14,7 +15,7 @@ import { approveHeldPrice, staleListings } from './sync.ts';
 
 export const router = new Router();
 const oauthStates = new Map<string, number>();
-const REQUIRED_SHOPIFY_SCOPES = ['read_products', 'read_inventory', 'write_inventory', 'read_locations'];
+const REQUIRED_SHOPIFY_SCOPES = ['write_products', 'read_inventory', 'write_inventory', 'read_locations'];
 
 const id = (ctx: Ctx) => {
   const n = Number(ctx.params.id);
@@ -194,17 +195,39 @@ router.get('/api/ebay/aspects', async ({ query }) => ({ aspects: await ebay.getA
 
 router.get('/api/shopify/products', async ({ query }) => {
   const page = await shopify.listProducts({ query: query.get('q') ?? undefined, after: query.get('after'), first: num(query.get('first'), 50) });
-  const linked = new Map(
-    all<{ shopify_variant_id: string; listing_id: number; status: string }>('SELECT i.shopify_variant_id, i.listing_id, l.status FROM listing_items i JOIN ebay_listings l ON l.id = i.listing_id').map((r) => [r.shopify_variant_id, r]),
+  const linked = new Map<string, { listing_id: number; status: string; linked_variants: number }>(
+    all<{ shopify_product_id: string; listing_id: number; status: string; linked_variants: number }>(
+      `SELECT l.shopify_product_id, MIN(l.id) AS listing_id, MIN(l.status) AS status, COUNT(i.id) AS linked_variants
+       FROM ebay_listings l JOIN listing_items i ON i.listing_id = l.id GROUP BY l.shopify_product_id`,
+    ).map((r) => [r.shopify_product_id, r]),
   );
   return {
     pageInfo: page.pageInfo,
     products: page.nodes.map((p) => ({
-      ...p,
+      id: p.id,
+      title: p.title,
+      vendor: p.vendor,
+      status: p.status,
+      totalInventory: p.totalInventory,
+      variantsCount: p.variantsCount.count,
+      minPrice: Number(p.priceRangeV2.minVariantPrice.amount),
+      maxPrice: Number(p.priceRangeV2.maxVariantPrice.amount),
       image: p.featuredMedia?.preview?.image?.url ?? null,
-      variants: p.variants.nodes.map((v) => ({ ...v, linked: linked.get(v.id) ?? null })),
+      linked: linked.get(p.id) ?? null,
     })),
   };
+});
+
+router.get('/api/shopify/products/:id', async ({ params }) => {
+  const product = await shopify.getProduct(params.id);
+  if (!product) throw new HttpError(404, 'Product not found');
+  const linked = new Map(
+    all<{ shopify_variant_id: string; listing_id: number; status: string }>(
+      'SELECT i.shopify_variant_id, i.listing_id, l.status FROM listing_items i JOIN ebay_listings l ON l.id = i.listing_id WHERE l.shopify_product_id = ?',
+      product.id,
+    ).map((r) => [r.shopify_variant_id, r]),
+  );
+  return { product: { ...product, variants: product.variants.nodes.map((v) => ({ ...v, linked: linked.get(v.id) ?? null })) } };
 });
 router.get('/api/shopify/locations', async () => ({ locations: await shopify.getLocations() }));
 router.get('/api/shopify/webhooks', async () => ({ webhooks: await shopify.listWebhooks() }));
@@ -229,6 +252,38 @@ router.post(
   },
   { public: true },
 );
+
+// ============ Catalog health (Shopify data quality) ============
+
+const catalogResponse = (scan: { at: string; rows: catalog.CatalogRow[] } | null) =>
+  scan ? { at: scan.at, summary: catalog.summarize(scan.rows), rows: scan.rows, issues: catalog.ISSUE_INFO, undo: catalog.lastUndo() } : { at: null, issues: catalog.ISSUE_INFO, undo: catalog.lastUndo() };
+
+router.get('/api/catalog', () => catalogResponse(catalog.cachedScan()));
+router.post('/api/catalog/scan', async () => catalogResponse(await catalog.scanCatalog()));
+router.post('/api/catalog/sku-preview', ({ body }) => {
+  const scan = catalog.cachedScan();
+  if (!scan) throw new HttpError(400, 'Scan the catalog first');
+  return { proposals: catalog.proposeSkus(scan.rows, (body?.mode ?? 'missing') as catalog.SkuMode) };
+});
+router.post('/api/catalog/apply', async ({ body }) => {
+  if (!catalog.cachedScan()) throw new HttpError(400, 'Scan the catalog first');
+  const changes = (body?.changes ?? []) as catalog.Change[];
+  if (!changes.length) throw new HttpError(400, 'No changes selected');
+  const res = await enqueue('catalog', () => catalog.applyChanges(changes, String(body?.label || 'Catalog update')));
+  return { ...res, ...catalogResponse(catalog.cachedScan()) };
+});
+router.post('/api/catalog/track-all', async () => {
+  const scan = catalog.cachedScan();
+  if (!scan) throw new HttpError(400, 'Scan the catalog first');
+  const changes = scan.rows.filter((r) => !r.tracked).map((r) => ({ variantId: r.variantId, productId: r.productId, tracked: true }));
+  if (!changes.length) return { done: 0, failed: [] };
+  const res = await enqueue('catalog', () => catalog.applyChanges(changes, 'Turn on inventory tracking'));
+  return { ...res, ...catalogResponse(await catalog.scanCatalog()) };
+});
+router.post('/api/catalog/undo', async () => {
+  const res = await enqueue('catalog', () => catalog.undoLast());
+  return { ...res, ...catalogResponse(await catalog.scanCatalog()) };
+});
 
 // ============ Profiles ============
 

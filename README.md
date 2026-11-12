@@ -38,6 +38,11 @@ It runs on a NAS (Synology, Unraid, QNAP), a Raspberry Pi, a home server or any 
 - Price history charts, plus alerts when competitors drop below your floor.
 - Choose whether Shopify sale prices also apply on eBay.
 
+**Catalog health (fixes your Shopify data for eBay)**
+- Scans every variant for missing or duplicate SKUs, SKUs eBay rejects, missing or invalid UPC/EAN barcodes (the check digit is verified), untracked stock, missing costs, brands and photos.
+- **SKU generator:** readable, unique SKUs like `SONY-WH1000XM5-BLK` built from brand, model number and options. You preview and edit every SKU before it's saved, and the last change can be undone with one click.
+- Turn on stock tracking for all variants at once, and type or scan barcodes and costs straight into a table.
+
 **Insights and alerts**
 - **Profit reports** using **real eBay fees** from eBay's Finances API and your item cost from Shopify, by month and by product.
 - **Stale listing alerts** for items with no sales in N days.
@@ -102,7 +107,7 @@ npm start          # http://localhost:8080
 
 When you first open the app you create a dashboard password. The wizard then walks you through these steps, with instructions and links on each screen:
 
-1. **Connect Shopify.** In the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard), create an app and give it the `read_products`, `read_inventory`, `write_inventory` and `read_locations` scopes. Release it and install it on your store. Paste the **Client ID** and **Client secret** into the app.
+1. **Connect Shopify.** In the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard), create an app and give it the `write_products`, `read_inventory`, `write_inventory` and `read_locations` scopes. `write_products` lets the app fix SKUs, barcodes and costs for you. Release it and install it on your store. Paste the **Client ID** and **Client secret** into the app.
    - If you already have an older custom app with a `shpat_…` token, you can use that instead.
 2. **eBay developer keys.** Join the free [eBay Developers Program](https://developer.ebay.com/) and create a **Production** keyset. Copy the **App ID**, **Cert ID** and **RuName**.
    - When eBay asks about *Marketplace Account Deletion* notifications, choose to **opt out**. This app doesn't store eBay buyers' personal data.

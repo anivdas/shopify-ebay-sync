@@ -11,6 +11,7 @@ import {
   Receipt,
   Rocket,
   Settings as SettingsIcon,
+  Stethoscope,
   Sun,
   Tags,
   X,
@@ -18,6 +19,7 @@ import {
 import { useEffect, useState } from 'react';
 import { api, post, useApi } from './api.ts';
 import { ActivityPage } from './pages/Activity.tsx';
+import { Catalog } from './pages/Catalog.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { ListingEditor } from './pages/ListingEditor.tsx';
 import { Listings } from './pages/Listings.tsx';
@@ -118,6 +120,7 @@ function Logo({ compact }: { compact?: boolean }) {
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/products', label: 'Shopify products', icon: Package },
+  { to: '/catalog', label: 'Catalog health', icon: Stethoscope },
   { to: '/listings', label: 'eBay listings', icon: Boxes },
   { to: '/profiles', label: 'Listing profiles', icon: Tags },
   { to: '/reports', label: 'Profit reports', icon: BarChart3 },
@@ -157,6 +160,7 @@ function Shell({ version, onLogout }: { version: string; onLogout: () => void })
   if (pathname === '/setup') page = <Setup onChange={status.reload} />;
   else if (listingMatch) page = <ListingEditor id={Number(listingMatch[1])} />;
   else if (pathname.startsWith('/products')) page = <Products />;
+  else if (pathname.startsWith('/catalog')) page = <Catalog />;
   else if (pathname.startsWith('/listings')) page = <Listings />;
   else if (pathname.startsWith('/profiles')) page = <Profiles />;
   else if (pathname.startsWith('/reports')) page = <Reports />;

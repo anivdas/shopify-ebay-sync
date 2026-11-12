@@ -85,50 +85,147 @@ export type ShopifyProduct = {
   tags: string[];
   descriptionHtml?: string;
   totalInventory?: number;
-  featuredMedia: { preview: { image: { url: string } | null } | null } | null;
-  media?: { nodes: { image?: { url: string } }[] };
+  featuredMedia: { preview: { image: { url: string; width?: number; height?: number } | null } | null } | null;
+  media?: { nodes: { image?: { url: string; width?: number; height?: number } }[] };
   options?: { name: string; values: string[] }[];
   variants: { nodes: ShopifyVariant[] };
 };
 
+// Uses the current (non-deprecated) `barcodes` and `media` fields; normalized into `barcode` / `image` below.
 const VARIANT_FIELDS = `
-  id title sku barcode price compareAtPrice inventoryQuantity
+  id title sku price compareAtPrice inventoryQuantity
+  barcodes(first: 2) { nodes { value type } }
   selectedOptions { name value }
-  image { url }
+  media(first: 1) { nodes { preview { image { url } } } }
   inventoryItem { id tracked unitCost { amount } }
 `;
 
+type RawVariant = Omit<ShopifyVariant, 'barcode' | 'image'> & {
+  barcodes?: { nodes: { value: string; type: string | null }[] };
+  media?: { nodes: { preview?: { image?: { url: string } | null } | null }[] };
+};
+
+/** Picks the GTIN-style barcode (UPC/EAN) if a variant has several. */
+export function pickBarcode(nodes: { value: string; type: string | null }[] = []): string | null {
+  const gtin = nodes.find((b) => /^\d{12,14}$/.test(b.value.trim()));
+  return (gtin ?? nodes[0])?.value.trim() || null;
+}
+
+const normalizeVariant = (v: RawVariant): ShopifyVariant => {
+  const { barcodes, media, ...rest } = v;
+  const url = media?.nodes[0]?.preview?.image?.url;
+  return { ...rest, barcode: pickBarcode(barcodes?.nodes), image: url ? { url } : null };
+};
+
+const normalizeProduct = (p: any): ShopifyProduct => ({ ...p, variants: { nodes: (p.variants?.nodes ?? []).map(normalizeVariant) } });
+
+export type ProductSummary = {
+  id: string;
+  title: string;
+  vendor: string;
+  productType: string;
+  status: string;
+  totalInventory: number | null;
+  hasOnlyDefaultVariant: boolean;
+  variantsCount: { count: number };
+  priceRangeV2: { minVariantPrice: { amount: string }; maxVariantPrice: { amount: string } };
+  featuredMedia: { preview: { image: { url: string } | null } | null } | null;
+};
+
+/** Lightweight product list (variants are loaded per product to stay under Shopify's query cost limit). */
 export async function listProducts(opts: { query?: string; after?: string | null; first?: number }) {
-  const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ShopifyProduct[] } }>(
+  const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ProductSummary[] } }>(
     `query ($first: Int!, $after: String, $query: String) {
       products(first: $first, after: $after, query: $query, sortKey: TITLE) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id title handle vendor productType status tags totalInventory
+          id title vendor productType status totalInventory hasOnlyDefaultVariant
+          variantsCount { count }
+          priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
           featuredMedia { preview { image { url } } }
-          variants(first: 100) { nodes { ${VARIANT_FIELDS} } }
         }
       }
     }`,
-    { first: opts.first ?? 50, after: opts.after ?? null, query: opts.query || null },
+    { first: Math.min(opts.first ?? 50, 100), after: opts.after ?? null, query: opts.query || null },
   );
   return data.products;
 }
 
+export type CatalogVariant = {
+  id: string;
+  title: string;
+  sku: string | null;
+  inventoryQuantity: number | null;
+  selectedOptions: { name: string; value: string }[];
+  barcodes: { nodes: { value: string; type: string | null }[] };
+  inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string } | null };
+  product: { id: string; title: string; vendor: string; status: string; featuredMedia: { preview: { image: { url: string; width: number | null; height: number | null } | null } | null } | null };
+};
+
+/** Iterates every variant in the store (flat pagination keeps each query cheap). */
+export async function* allVariants(): AsyncGenerator<CatalogVariant[]> {
+  let after: string | null = null;
+  for (;;) {
+    const data: { productVariants: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: CatalogVariant[] } } = await gql(
+      `query ($after: String) {
+        productVariants(first: 80, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id title sku inventoryQuantity
+            selectedOptions { name value }
+            barcodes(first: 3) { nodes { value type } }
+            inventoryItem { id tracked unitCost { amount } }
+            product { id title vendor status featuredMedia { preview { image { url width height } } } }
+          }
+        }
+      }`,
+      { after },
+    );
+    yield data.productVariants.nodes;
+    if (!data.productVariants.pageInfo.hasNextPage) return;
+    after = data.productVariants.pageInfo.endCursor;
+  }
+}
+
 export async function getProduct(id: string): Promise<ShopifyProduct | null> {
-  const data = await gql<{ product: ShopifyProduct | null }>(
+  const data = await gql<{ product: any }>(
     `query ($id: ID!) {
       product(id: $id) {
         id title handle vendor productType status tags descriptionHtml totalInventory
-        featuredMedia { preview { image { url } } }
+        featuredMedia { preview { image { url width height } } }
         options { name values }
-        media(first: 24) { nodes { ... on MediaImage { image { url } } } }
+        media(first: 24) { nodes { ... on MediaImage { image { url width height } } } }
         variants(first: 100) { nodes { ${VARIANT_FIELDS} } }
       }
     }`,
     { id },
   );
-  return data.product;
+  return data.product ? normalizeProduct(data.product) : null;
+}
+
+export type VariantPatch = { id: string; sku?: string; barcode?: string; cost?: number | null; tracked?: boolean };
+
+/** Updates SKU / barcode / cost / tracking for variants of one product in a single call (needs write_products). */
+export async function updateVariants(productId: string, patches: VariantPatch[]) {
+  const variants = patches.map((p) => {
+    const inventoryItem: Record<string, unknown> = {};
+    if (p.sku !== undefined) inventoryItem.sku = p.sku;
+    if (p.cost !== undefined) inventoryItem.cost = p.cost;
+    if (p.tracked !== undefined) inventoryItem.tracked = p.tracked;
+    return {
+      id: p.id,
+      ...(Object.keys(inventoryItem).length ? { inventoryItem } : {}),
+      ...(p.barcode !== undefined ? { barcodes: p.barcode ? [{ value: p.barcode }] : [] } : {}),
+    };
+  });
+  const data = await gql<{ productVariantsBulkUpdate: { userErrors: { field: string[] | null; message: string }[] } }>(
+    `mutation ($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+      productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { field message } }
+    }`,
+    { productId, variants },
+  );
+  const errors = data.productVariantsBulkUpdate.userErrors;
+  if (errors.length) throw new ShopifyError(errors.map((e) => e.message).join('; '), errors);
 }
 
 export type VariantState = {

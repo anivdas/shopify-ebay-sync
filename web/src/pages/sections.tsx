@@ -90,7 +90,7 @@ export function ShopifySection({ onSaved }: { onSaved?: () => void }) {
             Click <b>Create app</b>, then name it something like <i>eBay Sync</i>.
           </li>
           <li>
-            Under <b>Versions</b>, create a version. Add these <b>Access scopes</b>: <code className="text-xs">read_products, read_inventory, write_inventory, read_locations</code>. For App URL you can use <code className="text-xs">https://example.com</code>. Click <b>Release</b>.
+            Under <b>Versions</b>, create a version. Add these <b>Access scopes</b>: <code className="text-xs">write_products, read_inventory, write_inventory, read_locations</code> (<i>write_products</i> lets the Catalog health page fix SKUs, barcodes and costs for you). For App URL you can use <code className="text-xs">https://example.com</code>. Click <b>Release</b>.
           </li>
           <li>
             Go to <b>Home</b> and click <b>Install app</b>, then pick your store.
