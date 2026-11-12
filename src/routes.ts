@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { runAutoList } from './autolist.ts';
 import * as catalog from './catalog.ts';
 import { eligibility, listOverrides, setOverride } from './rules.ts';
-import { inferAspects, smartTitle, stripHtml } from './listing-builder.ts';
+import { inferAspects, renderDescription, smartTitle, stripHtml } from './listing-builder.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
-import { all, get, getSettings, getState, json, run, setState, updateSettings } from './db.ts';
+import { all, defaultSettings, get, getSettings, getState, json, run, setState, updateSettings } from './db.ts';
 import * as ebay from './ebay.ts';
 import { HttpError, num, Router, type Ctx } from './http.ts';
 import { enqueue, JOBS, jobStatus, queueWebhookSync, runJob } from './jobs.ts';
@@ -105,7 +105,7 @@ router.get('/api/status', () => {
 
 // ============ Settings & credentials ============
 
-router.get('/api/settings', () => ({ settings: getSettings(), marketplaces: MARKETPLACES }));
+router.get('/api/settings', () => ({ settings: getSettings(), defaults: { descriptionTemplate: defaultSettings.descriptionTemplate }, marketplaces: MARKETPLACES }));
 router.put('/api/settings', ({ body }) => {
   const s = updateSettings(body ?? {});
   if (body && ('markupMinPct' in body || 'markupMaxPct' in body)) setState('pricingReviewed', true);
@@ -267,6 +267,21 @@ router.post('/api/products/:id/override', async ({ params, body }) => {
 });
 
 router.post('/api/tools/title-preview', ({ body }) => smartTitle(String(body?.title ?? '')));
+
+const SAMPLE_DESCRIPTION =
+  '<p><span style="font-family:Times New Roman;font-size:18px;color:#c00">*Perfect Condition Sealed</span><br><br>*Limited Edition<br><br><font face="Comic Sans MS">Playback</font><br>Region Free</p><p style="font-size:11px">Steelbook Disclaimer: we inspect every steelbook carefully.</p>';
+router.post('/api/tools/description-preview', ({ body }) => {
+  const title = String(body?.title ?? 'Sample product');
+  return {
+    html: renderDescription(String(body?.template ?? ''), {
+      title,
+      fullTitle: title,
+      showFullTitle: body?.showFullTitle !== false,
+      keepFormatting: !!body?.keepFormatting,
+      description: SAMPLE_DESCRIPTION,
+    }),
+  };
+});
 
 router.post('/api/listings/:id/infer-aspects', async (ctx) => {
   const l = L.getListing(id(ctx));

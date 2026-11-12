@@ -283,6 +283,7 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
       title: product.title,
       fullTitle,
       showFullTitle: settings.showFullTitleInDescription,
+      keepFormatting: settings.keepDescriptionFormatting,
       description: product.descriptionHtml ?? '',
     });
     const varyingOptions = asGroup ? optionNames.filter((n) => new Set(groupVariants.map((v) => v.selectedOptions.find((o) => o.name === n)?.value)).size > 1) : [];
@@ -427,6 +428,7 @@ export async function refreshFromShopify(id: number) {
       title: product.title,
       fullTitle,
       showFullTitle: settings.showFullTitleInDescription,
+      keepFormatting: settings.keepDescriptionFormatting,
       description: product.descriptionHtml ?? '',
     });
   const excluded = excludedReasonFor(

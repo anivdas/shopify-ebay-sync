@@ -297,6 +297,8 @@ export const defaultSettings = {
   // Vendors buyers don't search for (big retailers): never used as brand or in titles. Comma-separated.
   ignoredVendors: 'Walmart, Best Buy, Target, Amazon, Costco',
   showFullTitleInDescription: true,
+  /** false = rebuild the Shopify description as plain paragraphs/bullets in one style */
+  keepDescriptionFormatting: false,
   // Rules. JSON arrays of { field: 'title'|'tag'|'type'|'vendor'|'collection', value: string } (case-insensitive "contains")
   excludeRules: JSON.stringify([
     { field: 'title', value: 'preorder' },
@@ -309,14 +311,11 @@ export const defaultSettings = {
   autoPublish: true,
   // [{ field, value, profileId }] - first match wins
   profileRules: '[]',
-  descriptionTemplate: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:0 auto;color:#222;line-height:1.5">
-  <h2 style="margin:0 0 12px">{{title}}</h2>
-  <p style="background:#eef7ee;padding:8px 12px;border-radius:6px"><b>Condition:</b> Brand new.</p>
-  <div>{{description}}</div>
-  <hr style="margin:20px 0;border:none;border-top:1px solid #ddd">
-  <h3>Shipping</h3><p>Ships fast with tracking on every order.</p>
-  <h3>Returns</h3><p>See the returns section of this listing for details.</p>
-</div>`,
+  descriptionTemplate: `<p style="background:#eef7ee;padding:8px 12px;border-radius:6px"><b>Condition:</b> Brand new.</p>
+{{description}}
+<hr style="margin:20px 0;border:none;border-top:1px solid #ddd">
+<p style="font-size:16px;margin:0 0 4px"><b>Shipping</b></p><p>Ships fast with tracking on every order.</p>
+<p style="font-size:16px;margin:0 0 4px"><b>Returns</b></p><p>See the returns section of this listing for details.</p>`,
   // alerts
   alertWebhookUrl: '',
   lowStockThreshold: 1,

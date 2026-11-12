@@ -6,13 +6,13 @@ import { Badge, Button, Callout, CopyField, Field, Toggle, useAction, useConfirm
 export type Settings = Record<string, any>;
 
 export function useSettings() {
-  const q = useApi<{ settings: Settings; marketplaces: Record<string, any> }>('/api/settings');
+  const q = useApi<{ settings: Settings; defaults: Settings; marketplaces: Record<string, any> }>('/api/settings');
   const save = async (patch: Settings) => {
     const r = await put<{ settings: Settings }>('/api/settings', patch);
     q.setData((d) => (d ? { ...d, settings: r.settings } : d));
     return r.settings;
   };
-  return { settings: q.data?.settings ?? null, marketplaces: q.data?.marketplaces ?? {}, save, reload: q.reload };
+  return { settings: q.data?.settings ?? null, defaults: q.data?.defaults ?? {}, marketplaces: q.data?.marketplaces ?? {}, save, reload: q.reload };
 }
 
 /** Local editable copy of some settings keys with a Save button. */
@@ -981,17 +981,27 @@ export function RulesSection() {
 // ======================= Listing templates =======================
 
 export function TemplatesSection() {
-  const { settings, save } = useSettings();
+  const { settings, defaults, save } = useSettings();
   const { busy, run } = useAction();
-  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription', 'vendorMode', 'vendorAspectName', 'ignoredVendors']);
+  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription', 'keepDescriptionFormatting', 'vendorMode', 'vendorAspectName', 'ignoredVendors']);
   const [sample, setSample] = useState('The Lord of the Rings: The Return of the King 4K Ultra HD Blu-ray Disc + Digital Code Limited Edition Steelbook Collection');
   const [preview, setPreview] = useState<{ title: string; shortened: boolean; removed: string[] } | null>(null);
+  const [descPreview, setDescPreview] = useState('');
   useEffect(() => {
     const t = setTimeout(() => post('/api/tools/title-preview', { title: sample }).then(setPreview).catch(() => undefined), 300);
     return () => clearTimeout(t);
   }, [sample]);
+  useEffect(() => {
+    const t = setTimeout(
+      () =>
+        post<{ html: string }>('/api/tools/description-preview', { title: sample, template: draft.descriptionTemplate, showFullTitle: draft.showFullTitleInDescription, keepFormatting: draft.keepDescriptionFormatting })
+          .then((r) => setDescPreview(r.html))
+          .catch(() => undefined),
+      300,
+    );
+    return () => clearTimeout(t);
+  }, [sample, draft.descriptionTemplate, draft.showFullTitleInDescription, draft.keepDescriptionFormatting]);
   if (!settings) return null;
-  const fullLine = draft.showFullTitleInDescription && !/\{\{\s*full_title\s*\}\}/.test(draft.descriptionTemplate ?? '') ? `<p style="font-size:15px"><b>This listing is for:</b> ${sample}</p>` : '';
   return (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -1037,24 +1047,26 @@ export function TemplatesSection() {
         label='Start the description with "This listing is for: <full Shopify product name>"'
         description="Keeps the complete product name on eBay even when the title had to be shortened. Or place {{full_title}} anywhere in your template yourself."
       />
+      <Toggle
+        checked={!!draft.keepDescriptionFormatting}
+        onChange={(v) => set('keepDescriptionFormatting', v)}
+        label="Keep formatting from Shopify descriptions"
+        description="Off (recommended): every description is rebuilt as plain paragraphs and bullet points in one font, so all listings look the same. Lines starting with * or - become bullets. On: keeps bold, links and layout, but still removes fonts and colors."
+      />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field label="Description template (HTML)" hint="Placeholders: {{full_title}} {{title}} {{description}}. Scripts and iframes are removed automatically because eBay blocks active content.">
-          <textarea rows={16} className="input font-mono text-xs" value={draft.descriptionTemplate ?? ''} onChange={(e) => set('descriptionTemplate', e.target.value)} />
-        </Field>
         <div>
-          <span className="label">Preview</span>
-          <iframe
-            title="preview"
-            sandbox=""
-            className="h-[340px] w-full rounded-xl border border-zinc-200 bg-white dark:border-white/10"
-            srcDoc={
-              fullLine +
-              (draft.descriptionTemplate ?? '')
-                .replace(/\{\{\s*full_title\s*\}\}/g, sample)
-                .replace(/\{\{\s*title\s*\}\}/g, sample)
-                .replace(/\{\{\s*description\s*\}\}/g, '<p>Your Shopify product description appears here.</p>')
-            }
-          />
+          <Field label="Description template (HTML)" hint="Placeholders: {{full_title}} {{title}} {{description}}. Fonts are set for you (Arial everywhere). Scripts and iframes are removed automatically because eBay blocks active content.">
+            <textarea rows={16} className="input font-mono text-xs" value={draft.descriptionTemplate ?? ''} onChange={(e) => set('descriptionTemplate', e.target.value)} />
+          </Field>
+          {defaults.descriptionTemplate && draft.descriptionTemplate !== defaults.descriptionTemplate && (
+            <Button variant="ghost" className="mt-2 px-2 py-1 text-xs" onClick={() => set('descriptionTemplate', defaults.descriptionTemplate)}>
+              <RefreshCw className="size-3.5" /> Reset to default template
+            </Button>
+          )}
+        </div>
+        <div>
+          <span className="label">Preview (with a messy sample description)</span>
+          <iframe title="preview" sandbox="" className="h-[340px] w-full rounded-xl border border-zinc-200 bg-white dark:border-white/10" srcDoc={descPreview} />
         </div>
       </div>
       <Button variant="primary" disabled={!dirty} loading={busy === 'save'} onClick={() => run('save', () => save(draft), 'Templates saved')}>

@@ -180,20 +180,67 @@ const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').re
  * If the template has no {{full_title}} and showFullTitle is on, a "This listing is for: ..." line is added on top,
  * so nothing is lost when the eBay title had to be shortened.
  */
-export function renderDescription(template: string, vars: { title: string; description: string; fullTitle?: string; showFullTitle?: boolean }): string {
+export function renderDescription(template: string, vars: { title: string; description: string; fullTitle?: string; showFullTitle?: boolean; keepFormatting?: boolean }): string {
   const full = escHtml(collapse(vars.fullTitle ?? vars.title));
+  // {{x}} is the documented form; {x} is accepted too so a single-brace template still works.
+  const ph = (name: string) => new RegExp(`\\{\\{\\s*${name}\\s*\\}\\}|\\{\\s*${name}\\s*\\}`, 'g');
   let tpl = template || '{{description}}';
-  if (vars.showFullTitle !== false && !/\{\{\s*full_title\s*\}\}/.test(tpl))
-    tpl = `<p style="font-size:15px"><b>This listing is for:</b> {{full_title}}</p>\n${tpl}`;
+  if (vars.showFullTitle !== false && !ph('full_title').test(tpl)) tpl = `<p><b>This listing is for:</b> {{full_title}}</p>\n${tpl}`;
+  const description = vars.keepFormatting ? normalizeStyles(sanitizeHtml(vars.description)) : cleanDescription(vars.description);
   const body = tpl
-    .replace(/\{\{\s*full_title\s*\}\}/g, full)
-    .replace(/\{\{\s*title\s*\}\}/g, escHtml(vars.title))
-    .replace(/\{\{\s*description\s*\}\}/g, normalizeStyles(sanitizeHtml(vars.description)));
+    .replace(/font-family\s*:[^;"']*;?/gi, '')
+    .replace(/\sstyle\s*=\s*(["'])\s*\1/gi, '')
+    .replace(ph('full_title'), full)
+    .replace(ph('title'), escHtml(vars.title))
+    .replace(ph('description'), () => description);
   return sanitizeHtml(`<div style="${DESCRIPTION_STYLE}">\n${body}\n</div>`);
 }
 
 /** One font for every listing; set on a wrapper so template and Shopify content look the same. */
 export const DESCRIPTION_STYLE = 'font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;max-width:900px;margin:0 auto';
+
+const decodeEntities = (s: string) =>
+  s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&');
+
+const BULLET = /^\s*(?:[*•\-–·]|\d+[.)])\s*/;
+
+/**
+ * Rebuilds a Shopify description as plain, uniformly styled HTML: all fonts, colors, sizes, spans,
+ * tables and inline styles are dropped. Each line becomes a paragraph; lines starting with
+ * *, -, • or "1." (and <li> items) become a bullet list.
+ */
+export function cleanDescription(html: string): string {
+  const text = decodeEntities(
+    sanitizeHtml(html)
+      .replace(/<li\b[^>]*>/gi, '\n• ')
+      .replace(/<br\s*\/?>|<\/(p|div|h[1-6]|li|tr|blockquote|ul|ol|table)>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  );
+  const lines = text
+    .split('\n')
+    .map((l) => l.replace(/[ \t\u00a0]+/g, ' ').trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  let list: string[] = [];
+  const flush = () => {
+    if (list.length) out.push(`<ul>${list.map((l) => `<li>${escHtml(l)}</li>`).join('')}</ul>`);
+    list = [];
+  };
+  for (const line of lines) {
+    if (BULLET.test(line) && line.replace(BULLET, '')) list.push(line.replace(BULLET, ''));
+    else (flush(), out.push(`<p>${escHtml(line)}</p>`));
+  }
+  flush();
+  return out.join('\n');
+}
 
 /** Drops font/size/color styling pasted into Shopify descriptions; keeps bold, italics, alignment, lists, links. */
 export function normalizeStyles(html: string): string {

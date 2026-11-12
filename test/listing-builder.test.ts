@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cleanAspects, DESCRIPTION_STYLE, ebayQuantity, ebaySku, gtinFields, inferAspects, inferFormat, inferMovieTitle, normalizeStyles, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
+import { cleanAspects, cleanDescription, DESCRIPTION_STYLE, ebayQuantity, ebaySku, gtinFields, inferAspects, inferFormat, inferMovieTitle, normalizeStyles, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
 
 test('title template dedupes brand and limits to 80 chars', () => {
   assert.equal(renderTitle('{brand} {title} {options}', { brand: 'Sony', title: 'Sony WH-1000XM5 Headphones', options: 'Black' }), 'Sony WH-1000XM5 Headphones Black');
@@ -29,7 +29,7 @@ const unwrap = (html: string) => html.replace(new RegExp(`^<div style="${DESCRIP
 test('renderDescription escapes title and inserts description in one consistent wrapper', () => {
   const out = renderDescription('<h1>{{title}}</h1>{{description}}', { title: 'A<B', description: '<b>x</b>', showFullTitle: false });
   assert.ok(out.startsWith(`<div style="${DESCRIPTION_STYLE}">`));
-  assert.equal(unwrap(out), '<h1>A&lt;B</h1><b>x</b>');
+  assert.equal(unwrap(out), '<h1>A&lt;B</h1><p>x</p>');
 });
 
 test('renderDescription adds the full Shopify name on top (inside the wrapper) unless the template places it', () => {
@@ -37,6 +37,22 @@ test('renderDescription adds the full Shopify name on top (inside the wrapper) u
   assert.match(out, /^<p[^>]*><b>This listing is for:<\/b> Movie 4K Steelbook - Region Free<\/p>/);
   const placed = unwrap(renderDescription('<h2>{{full_title}}</h2>{{description}}', { title: 'Movie', fullTitle: 'Movie Full', description: '' }));
   assert.equal(placed, '<h2>Movie Full</h2>');
+});
+
+test('cleanDescription strips all formatting into plain paragraphs and bullets', () => {
+  const html =
+    '<p><span style="font-family:Times;font-size:18px;color:#c00">*Perfect Condition Sealed (No Dents)</span><br><br>*Limited Edition<br><br><font face="Comic Sans">Playback</font><br>Region&nbsp;Free</p><table><tr><td>Disc &amp; case</td></tr></table><ul><li><b>Bonus</b> art</li></ul>';
+  assert.equal(
+    cleanDescription(html),
+    ['<ul><li>Perfect Condition Sealed (No Dents)</li><li>Limited Edition</li></ul>', '<p>Playback</p>', '<p>Region Free</p>', '<p>Disc &amp; case</p>', '<ul><li>Bonus art</li></ul>'].join('\n'),
+  );
+});
+
+test('renderDescription cleans the Shopify description by default and accepts {single} braces', () => {
+  const out = unwrap(renderDescription('<div style="font-family:Times">{title}</div>{description}', { title: 'Movie', description: '<p style="color:red">Hello</p>', showFullTitle: false }));
+  assert.equal(out, '<div>Movie</div><p>Hello</p>');
+  const kept = unwrap(renderDescription('{{description}}', { title: 'M', description: '<p><b>Hi</b></p>', showFullTitle: false, keepFormatting: true }));
+  assert.equal(kept, '<p><b>Hi</b></p>');
 });
 
 test('normalizeStyles removes pasted fonts and colors but keeps structure', () => {
