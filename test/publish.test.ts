@@ -61,6 +61,8 @@ test('multi-variation listing is published in the order eBay requires', async ()
   const itemS = calls.find((c) => c.url.includes('/inventory_item/TEE-S'))!.body;
   assert.deepEqual(itemS.product.aspects.Size, ['S']);
   assert.deepEqual(itemS.product.upc, ['012345678905']);
+  assert.equal(itemS.product.brand, 'Acme');
+  assert.equal(itemS.product.mpn, 'Does not apply', 'eBay rejects a brand without an MPN (BrandMPN error)');
   assert.equal(itemS.availability.shipToLocationAvailability.quantity, 3);
 
   const offers = calls.filter((c) => c.url.endsWith('/sell/inventory/v1/offer')).map((c) => c.body);

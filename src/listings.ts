@@ -559,6 +559,9 @@ function inventoryPayload(listing: Listing, item: Item, qty: number, settings: S
   if (gtin.aspect) aspects[gtin.aspect[0]] = [gtin.aspect[1]];
   const images = json<string[]>(listing.image_urls, []);
   const itemImages = listing.kind === 'group' ? [item.image_url ?? images[0]].filter(Boolean) : images;
+  const brand = listing.brand ?? shared.Brand?.[0];
+  // eBay rejects a brand without an MPN ("BrandMPN is invalid or missing"); media etc. have no part number.
+  const mpn = item.mpn || shared.MPN?.[0] || (brand ? MPN_NOT_APPLICABLE : undefined);
   return {
     availability: { shipToLocationAvailability: { quantity: qty } },
     condition: listing.condition || 'NEW',
@@ -568,13 +571,15 @@ function inventoryPayload(listing: Listing, item: Item, qty: number, settings: S
       description: stripHtml(listing.description_html).slice(0, 3990),
       aspects: cleanAspects(aspects),
       imageUrls: itemImages as string[],
-      brand: listing.brand ?? shared.Brand?.[0],
-      mpn: item.mpn ?? shared.MPN?.[0],
+      brand,
+      mpn,
       ...(gtin.upc ? { upc: gtin.upc } : {}),
       ...(gtin.ean ? { ean: gtin.ean } : {}),
     },
   };
 }
+
+export const MPN_NOT_APPLICABLE = 'Does not apply';
 
 export function offerPayload(listing: Listing, item: Item, price: number, qty: number, settings: Settings): ebay.OfferPayload {
   const conf = ebayConf();
