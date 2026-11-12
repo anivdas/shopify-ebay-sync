@@ -707,14 +707,19 @@ export async function deleteListing(id: number) {
 export function listingWithItems(id: number) {
   const listing = getListing(id);
   if (!listing) return null;
-  const settings = getSettings();
+  return { ...decodeListing(listing), items: getItems(id).map(decodeItem) };
+}
+
+/** The box and per-item package eBay gets for calculated shipping (same code as publishing), for display. */
+export function listingPackage(listing: Listing, settings = getSettings()) {
   const box = resolveBox(settings, listing.box_id, getProfile(listing.profile_id)?.box_id);
-  // The exact package eBay gets for calculated shipping, so the editor can show it.
-  const items = getItems(id).map((i) => {
-    const productOz = toOunces(i.weight_value, i.weight_unit);
-    return { ...decodeItem(i), product_oz: productOz, package: packageWeightAndSize(box, productOz) ?? null };
-  });
-  return { ...decodeListing(listing), box, items };
+  return {
+    box,
+    item: (i: Item) => {
+      const productOz = toOunces(i.weight_value, i.weight_unit);
+      return { product_oz: productOz, package: packageWeightAndSize(box, productOz) ?? null };
+    },
+  };
 }
 
 export const decodeListing = (l: Listing | Row) => ({

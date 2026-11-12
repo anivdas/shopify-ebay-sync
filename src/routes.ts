@@ -421,7 +421,8 @@ router.get('/api/listings', ({ query }) => {
 router.get('/api/listings/:id', (ctx) => {
   const l = L.getListing(id(ctx));
   if (!l) throw new HttpError(404, 'Listing not found');
-  return { listing: { ...L.decodeListing(l), items: L.getItems(l.id).map((i) => enrichItem(i, l)) } };
+  const pkg = L.listingPackage(l);
+  return { listing: { ...L.decodeListing(l), box: pkg.box, items: L.getItems(l.id).map((i) => ({ ...enrichItem(i, l), ...pkg.item(i) })) } };
 });
 
 router.post('/api/listings', async ({ body }) => {
