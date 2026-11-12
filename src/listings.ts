@@ -550,7 +550,7 @@ export async function validateListing(id: number): Promise<Issue[]> {
 
 function inventoryPayload(listing: Listing, item: Item, qty: number, settings: Settings): ebay.InventoryItemPayload {
   const box = resolveBox(settings, listing.box_id, getProfile(listing.profile_id)?.box_id);
-  const pkg = packageWeightAndSize(box, toOunces(item.weight_value, item.weight_unit));
+  const pkg = packageWeightAndSize(box, toOunces(item.weight_value, item.weight_unit), ebayConf().marketplaceId);
   const shared = json<Record<string, string[]>>(listing.aspects, {});
   const opts = json<Record<string, string>>(item.options, {});
   const aspects: Record<string, string[]> = { ...shared };
@@ -722,7 +722,7 @@ export function listingPackage(listing: Listing, settings = getSettings()) {
     box,
     item: (i: Item) => {
       const productOz = toOunces(i.weight_value, i.weight_unit);
-      return { product_oz: productOz, package: packageWeightAndSize(box, productOz) ?? null };
+      return { product_oz: productOz, package: packageWeightAndSize(box, productOz, ebayConf().marketplaceId) ?? null };
     },
   };
 }

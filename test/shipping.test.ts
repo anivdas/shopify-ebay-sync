@@ -36,7 +36,8 @@ test('eBay package = box dims + product weight + empty box weight, rounded up to
   const pkg = packageWeightAndSize(resolveBox(settings, 's'), 26)!;
   assert.deepEqual(pkg.dimensions, { length: 8, width: 6, height: 4, unit: 'INCH' });
   assert.deepEqual(pkg.weight, { value: 1.9, unit: 'POUND' }, '26 oz + 3 oz box = 1.81 lb, rounded up');
-  assert.equal(pkg.packageType, 'MAILING_BOX');
+  assert.equal(pkg.packageType, 'PACKAGE_THICK_ENVELOPE', 'eBay US rejects MAILING_BOX (Invalid <ShippingPackage>)');
+  assert.equal(packageWeightAndSize(resolveBox(settings, 's'), 26, 'EBAY_AU')!.packageType, 'MAILING_BOX');
   assert.equal(packageWeightAndSize(null, 0), undefined);
 });
 

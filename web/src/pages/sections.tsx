@@ -572,7 +572,7 @@ export function PricingSection({ onSaved }: { onSaved?: () => void }) {
 
 type BoxDraft = { id: string; name: string; length: number | ''; width: number | ''; height: number | ''; unit: 'INCH' | 'CENTIMETER'; emptyWeightOz: number | ''; packageType: string };
 const PACKAGE_TYPES: [string, string][] = [
-  ['MAILING_BOX', 'Box'],
+  ['MAILING_BOX', 'Box (sent to eBay as Package/thick envelope outside Australia)'],
   ['PADDED_BAGS', 'Padded mailer / poly bag'],
   ['PACKAGE_THICK_ENVELOPE', 'Thick envelope'],
   ['LARGE_ENVELOPE', 'Large envelope / flat'],

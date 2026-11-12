@@ -44,12 +44,18 @@ const TO_OZ: Record<string, number> = { OUNCES: 1, POUNDS: 16, GRAMS: 0.03527396
 export const toOunces = (value: number | null | undefined, unit: string | null | undefined) =>
   value && value > 0 ? value * (TO_OZ[String(unit).toUpperCase()] ?? 0) : 0;
 
+/**
+ * eBay only accepts MAILING_BOX on eBay Australia ("Invalid <ShippingPackage>" elsewhere);
+ * a regular box is "Package/thick envelope" (PACKAGE_THICK_ENVELOPE) on other sites.
+ */
+export const ebayPackageType = (type: string, marketplaceId: string) => (type === 'MAILING_BOX' && marketplaceId !== 'EBAY_AU' ? 'PACKAGE_THICK_ENVELOPE' : type);
+
 /** eBay packageWeightAndSize: product weight + empty box weight, rounded up to 0.1 lb so labels are never under-charged. */
-export function packageWeightAndSize(box: Box | null, productOz: number) {
+export function packageWeightAndSize(box: Box | null, productOz: number, marketplaceId = 'EBAY_US') {
   const totalOz = productOz + (box?.emptyWeightOz ?? 0);
   if (!box && totalOz <= 0) return undefined;
   return {
-    ...(box ? { packageType: box.packageType, dimensions: { length: box.length, width: box.width, height: box.height, unit: box.unit } } : {}),
+    ...(box ? { packageType: ebayPackageType(box.packageType, marketplaceId), dimensions: { length: box.length, width: box.width, height: box.height, unit: box.unit } } : {}),
     ...(totalOz > 0 ? { weight: { value: Math.ceil((totalOz / 16) * 10) / 10, unit: 'POUND' } } : {}),
   };
 }
