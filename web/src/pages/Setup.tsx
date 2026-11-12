@@ -1,5 +1,5 @@
 import { Check, ChevronRight, PartyPopper } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useApi } from '../api.ts';
 import { Badge, Button, Callout, cx, Link, PageHeader, Spinner } from '../ui.tsx';
 import { EbayConnectSection, EbayKeysSection, PoliciesSection, PricingSection, ShopifySection, SyncSection } from './sections.tsx';
@@ -15,16 +15,11 @@ const STEPS = [
 
 export function Setup({ onChange }: { onChange: () => void }) {
   const status = useApi('/api/status');
-  const [step, setStep] = useState<string | null>(null);
+  const [picked, setStep] = useState<string | null>(() => (new URLSearchParams(location.search).get('ebay') === 'connected' ? 'policies' : null));
   const checklist = status.data?.checklist;
   const done = (key: string) => (key === 'extras' ? false : !!checklist?.steps.find((s: any) => s.key === key)?.done);
-
-  useEffect(() => {
-    if (!checklist || step) return;
-    const qs = new URLSearchParams(location.search);
-    if (qs.get('ebay') === 'connected') return setStep('policies');
-    setStep(STEPS.find((s) => !done(s.key))?.key ?? 'extras');
-  }, [checklist]);
+  // Until the user picks a step, show the first unfinished one (computed during render, so there is never an "empty" step)
+  const step = picked ?? STEPS.find((s) => !done(s.key))?.key ?? 'extras';
 
   const refresh = () => {
     status.reload();
@@ -37,7 +32,7 @@ export function Setup({ onChange }: { onChange: () => void }) {
       </div>
     );
 
-  const idx = STEPS.findIndex((s) => s.key === step);
+  const idx = Math.max(0, STEPS.findIndex((s) => s.key === step));
   const current = STEPS[idx];
   const next = () => setStep(STEPS[Math.min(idx + 1, STEPS.length - 1)].key);
 

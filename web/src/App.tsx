@@ -16,7 +16,7 @@ import {
   Tags,
   X,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Component, useEffect, useState } from 'react';
 import { api, post, useApi } from './api.ts';
 import { ActivityPage } from './pages/Activity.tsx';
 import { Catalog } from './pages/Catalog.tsx';
@@ -53,6 +53,7 @@ export function App() {
 }
 
 function Login({ firstRun, onDone }: { firstRun: boolean; onDone: () => void }) {
+  const { navigate } = useRouter();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +65,8 @@ function Login({ firstRun, onDone }: { firstRun: boolean; onDone: () => void }) 
     setBusy(true);
     try {
       await post(firstRun ? '/api/setup/password' : '/api/login', { password });
-      if (firstRun) history.replaceState(null, '', '/setup');
+      if (firstRun) navigate('/setup');
       onDone();
-      if (firstRun) location.reload();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -233,9 +233,35 @@ function Shell({ version, onLogout }: { version: string; onLogout: () => void })
         </div>
       )}
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{page}</main>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <ErrorBoundary key={pathname}>{page}</ErrorBoundary>
+      </main>
     </div>
   );
+}
+
+/** Shows a friendly message instead of a blank page if a screen crashes. */
+class ErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error) {
+    console.error(error);
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="card mx-auto max-w-lg p-6 text-center">
+        <h2 className="font-semibold">Something went wrong on this page</h2>
+        <p className="mt-2 font-mono text-xs break-words text-rose-500">{this.state.error.message}</p>
+        <p className="mt-2 text-sm text-zinc-500">Your data is safe. Try reloading. If it keeps happening, report it with this message.</p>
+        <Button variant="primary" className="mt-4" onClick={() => location.reload()}>
+          Reload
+        </Button>
+      </div>
+    );
+  }
 }
 
 function Footer({ version, dryRun, onLogout }: { version: string; dryRun?: boolean; onLogout: () => void }) {
