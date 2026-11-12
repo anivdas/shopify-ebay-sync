@@ -147,10 +147,22 @@ export type ProductSummary = {
 };
 
 /** Lightweight product list (variants are loaded per product to stay under Shopify's query cost limit). */
-export async function listProducts(opts: { query?: string; after?: string | null; first?: number }) {
+export const PRODUCT_SORTS = {
+  title: { sortKey: 'TITLE', reverse: false },
+  stock: { sortKey: 'INVENTORY_TOTAL', reverse: true },
+  newest: { sortKey: 'CREATED_AT', reverse: true },
+  updated: { sortKey: 'UPDATED_AT', reverse: true },
+} as const;
+export type ProductSort = keyof typeof PRODUCT_SORTS;
+
+/** Shopify search query: free text plus an optional "has stock" filter (applied by Shopify, so every page is filtered). */
+export const productQuery = (text?: string, inStock?: boolean) => [text?.trim() ? `(${text.trim()})` : '', inStock ? 'inventory_total:>0' : ''].filter(Boolean).join(' ') || null;
+
+export async function listProducts(opts: { query?: string; after?: string | null; first?: number; sort?: ProductSort; inStock?: boolean }) {
+  const sort = PRODUCT_SORTS[opts.sort ?? 'title'] ?? PRODUCT_SORTS.title;
   const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: any[] } }>(
-    `query ($first: Int!, $after: String, $query: String) {
-      products(first: $first, after: $after, query: $query, sortKey: TITLE) {
+    `query ($first: Int!, $after: String, $query: String, $sortKey: ProductSortKeys!, $reverse: Boolean!) {
+      products(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id title vendor productType status totalInventory hasOnlyDefaultVariant tags
@@ -161,7 +173,7 @@ export async function listProducts(opts: { query?: string; after?: string | null
         }
       }
     }`,
-    { first: Math.min(opts.first ?? 50, 50), after: opts.after ?? null, query: opts.query || null },
+    { first: Math.min(opts.first ?? 50, 50), after: opts.after ?? null, query: productQuery(opts.query, opts.inStock), sortKey: sort.sortKey, reverse: sort.reverse },
   );
   return { pageInfo: data.products.pageInfo, nodes: data.products.nodes.map(flattenCollections) as ProductSummary[] };
 }

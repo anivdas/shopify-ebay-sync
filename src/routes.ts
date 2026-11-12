@@ -216,7 +216,13 @@ router.get('/api/ebay/aspects', async ({ query }) => ({ aspects: await ebay.getA
 // ============ Shopify ============
 
 router.get('/api/shopify/products', async ({ query }) => {
-  const page = await shopify.listProducts({ query: query.get('q') ?? undefined, after: query.get('after'), first: num(query.get('first'), 50) });
+  const page = await shopify.listProducts({
+    query: query.get('q') ?? undefined,
+    after: query.get('after'),
+    first: num(query.get('first'), 50),
+    sort: (query.get('sort') ?? 'title') as shopify.ProductSort,
+    inStock: query.get('inStock') === '1',
+  });
   const linked = new Map<string, { listing_id: number; status: string; linked_variants: number }>(
     all<{ shopify_product_id: string; listing_id: number; status: string; linked_variants: number }>(
       `SELECT l.shopify_product_id, MIN(l.id) AS listing_id, MIN(l.status) AS status, COUNT(i.id) AS linked_variants

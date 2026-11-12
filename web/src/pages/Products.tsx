@@ -11,8 +11,17 @@ export function Products() {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [sort, setSort] = useState(() => localStorage.getItem('products.sort') ?? 'title');
+  const [inStock, setInStock] = useState(() => localStorage.getItem('products.inStock') !== '0');
   const after = cursors[cursors.length - 1];
-  const list = useApi(`/api/shopify/products?first=50${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+  const list = useApi(
+    `/api/shopify/products?first=50&sort=${sort}&inStock=${inStock ? 1 : 0}${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&after=${encodeURIComponent(after)}` : ''}`,
+  );
+  useEffect(() => {
+    localStorage.setItem('products.sort', sort);
+    localStorage.setItem('products.inStock', inStock ? '1' : '0');
+    setCursors([null]);
+  }, [sort, inStock]);
   const status = useApi('/api/status');
   const profiles = useApi('/api/profiles');
   const [selected, setSelected] = useState<Selection>({});
@@ -101,6 +110,16 @@ export function Products() {
             <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-400" />
             <input className="input pl-9" placeholder="Search products (title, SKU, barcode, vendor...)" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm" title="Hide products with no stock in Shopify (they can't be sold on eBay)">
+            <input type="checkbox" className="size-4 accent-brand-500" checked={inStock} onChange={(e) => setInStock(e.target.checked)} />
+            In stock only
+          </label>
+          <select className="input w-auto shrink-0 py-2 text-sm" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort products">
+            <option value="title">Sort: Title A-Z</option>
+            <option value="stock">Sort: Most stock</option>
+            <option value="newest">Sort: Newest</option>
+            <option value="updated">Sort: Recently updated</option>
+          </select>
           {list.loading && <Spinner />}
         </div>
         {list.error && (
