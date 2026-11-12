@@ -255,6 +255,10 @@ docker/    container entrypoint
 
 ## License
 
-[MIT](LICENSE). Free to use, modify and share.
+[MIT with the Commons Clause](LICENSE). This is source-available, not OSI open source.
+
+- ✅ Free to use, including to run your own Shopify/eBay business
+- ✅ Free to modify and to share your changes (for free), keeping the license notice
+- ❌ Not allowed: selling the app, or charging others for hosting, setup or support whose value comes mainly from this app
 
 *This project is not affiliated with Shopify or eBay. Use at your own risk, and try dry-run mode first.*

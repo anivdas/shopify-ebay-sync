@@ -2,7 +2,7 @@
   "name": "shopify-ebay-sync",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "description": "Self-hosted Shopify <-> eBay inventory sync, lister and price advisor",
   "type": "module",
   "engines": {
