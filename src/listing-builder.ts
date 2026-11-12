@@ -169,9 +169,10 @@ export function countryValue(code: string | null | undefined, allowed: string[] 
   }
   const names = [...new Set([...(COUNTRY_ALIASES[c] ?? []), display].filter((x): x is string => !!x && x !== c))];
   if (!allowed.length) return names[0] ?? null;
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+  // Order- and punctuation-insensitive, so "South Korea" matches "Korea, South" and "Korea (South)".
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/).filter(Boolean).sort().join(' ');
   for (const n of names) {
-    const hit = allowed.find((v) => norm(v) === norm(n));
+    const hit = allowed.find((v) => words(v) === words(n));
     if (hit) return hit;
   }
   return null;

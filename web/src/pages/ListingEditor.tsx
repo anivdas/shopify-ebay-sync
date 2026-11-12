@@ -581,7 +581,7 @@ function AspectsEditor({ listingId, categoryId, aspects, variesBy, items, kind, 
                   <>
                     <input list={listId} className={cx('input', d.required && !v.length && !covered && 'border-rose-400')} value={v.join(', ')} placeholder={covered ? '(from variants)' : ''} onChange={(e) => setVal(d.name, e.target.value, d.multi)} />
                     <datalist id={listId}>
-                      {d.values.slice(0, 100).map((x) => (
+                      {d.values.map((x) => (
                         <option key={x} value={x} />
                       ))}
                     </datalist>

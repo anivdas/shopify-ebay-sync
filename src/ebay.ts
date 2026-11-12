@@ -243,15 +243,20 @@ export async function getAspects(categoryId: string): Promise<Aspect[]> {
     auth: 'app',
     query: { category_id: categoryId },
   });
-  const aspects = (res.aspects ?? []).map((a) => ({
-    name: a.localizedAspectName as string,
-    required: !!a.aspectConstraint?.aspectRequired,
-    recommended: a.aspectConstraint?.aspectUsage === 'RECOMMENDED',
-    multi: a.aspectConstraint?.itemToAspectCardinality === 'MULTI',
-    freeText: a.aspectConstraint?.aspectMode !== 'SELECTION_ONLY',
-    values: (a.aspectValues ?? []).slice(0, 200).map((v: any) => v.localizedValue as string),
-    variationAllowed: a.aspectConstraint?.aspectEnabledForVariations !== false,
-  }));
+  const aspects = (res.aspects ?? []).map((a) => {
+    const freeText = a.aspectConstraint?.aspectMode !== 'SELECTION_ONLY';
+    const values = (a.aspectValues ?? []).map((v: any) => v.localizedValue as string);
+    return {
+      name: a.localizedAspectName as string,
+      required: !!a.aspectConstraint?.aspectRequired,
+      recommended: a.aspectConstraint?.aspectUsage === 'RECOMMENDED',
+      multi: a.aspectConstraint?.itemToAspectCardinality === 'MULTI',
+      freeText,
+      // Selection-only lists must be complete (e.g. countries go past "Slovenia"); free-text ones are just suggestions.
+      values: freeText ? values.slice(0, 1000) : values,
+      variationAllowed: a.aspectConstraint?.aspectEnabledForVariations !== false,
+    };
+  });
   aspectCache.set(categoryId, { at: Date.now(), aspects });
   return aspects;
 }

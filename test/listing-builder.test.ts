@@ -141,6 +141,8 @@ test('inferMovieTitle extracts the movie name', () => {
 test('countryValue maps Shopify ISO codes to eBay country values', () => {
   assert.equal(countryValue('KR', ['United Kingdom', 'Korea, Republic of', 'Japan']), 'Korea, Republic of');
   assert.equal(countryValue('KR', ['South Korea']), 'South Korea');
+  assert.equal(countryValue('KR', ['Korea, North', 'Korea, South']), 'Korea, South');
+  assert.equal(countryValue('US', ['States, United', 'Canada']), 'States, United');
   assert.equal(countryValue('JP', ['United Kingdom', 'Japan']), 'Japan');
   assert.equal(countryValue('KR'), 'South Korea');
   assert.equal(countryValue('ZZZ'), null);
