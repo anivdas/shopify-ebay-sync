@@ -288,7 +288,8 @@ export const defaultSettings = {
   paymentPolicyId: '',
   returnPolicyId: '',
   merchantLocationKey: '',
-  titleTemplate: '{brand} {title} {options}',
+  // The Shopify title is usually what buyers search for, so it's used as-is by default
+  titleTemplate: '{title} {options}',
   // How the Shopify "Vendor" field is used: 'brand' = eBay Brand + {brand} in titles,
   // 'aspect' = another item specific (vendorAspectName), 'ignore' = not used on eBay
   vendorMode: 'brand',

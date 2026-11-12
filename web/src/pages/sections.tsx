@@ -936,7 +936,7 @@ export function TemplatesSection() {
       </div>
       <Field
         label="Title template"
-        hint={`Placeholders: {brand} {title} {options} {type} {sku}. Tip: "{title} {brand} {options}" leads with the product name, which is what buyers type first. The brand is skipped if it's already in the title.${draft.vendorMode !== 'brand' ? ' {brand} is empty because Vendor isn\u2019t used as the brand.' : ''}`}
+        hint={`Placeholders: {brand} {title} {options} {type} {sku}. Default "{title} {options}" uses your Shopify title as-is (plus the variant for per-variant listings). Add {brand} to also put the vendor in the title; it's skipped if already there.${draft.vendorMode !== 'brand' ? ' {brand} is empty because Vendor isn\u2019t used as the brand.' : ''}`}
       >
         <input className="input font-mono" value={draft.titleTemplate ?? ''} onChange={(e) => set('titleTemplate', e.target.value)} />
       </Field>
