@@ -3,6 +3,8 @@ export type PricingRules = {
   maxPct: number;
   undercut: number;
   charm: boolean;
+  /** What eBay buyers typically pay you for shipping; competitors are compared on item + shipping. */
+  ownShipping?: number;
 };
 
 export type MarketStats = {
@@ -65,8 +67,12 @@ export function recommend(base: number, market: MarketStats, rules: PricingRules
     position = 'no_data';
     reason = 'No matching brand-new listings found; using the middle of your markup range.';
   } else {
-    const desired = toCents(anchor) - toCents(market.activeMin !== null ? rules.undercut : 0);
-    const source = market.activeMin !== null ? `lowest active new listing ($${anchor.toFixed(2)} incl. shipping)` : `median sold price ($${anchor.toFixed(2)})`;
+    const ship = market.activeMin !== null ? (rules.ownShipping ?? 0) : 0;
+    const desired = toCents(anchor) - toCents(market.activeMin !== null ? rules.undercut : 0) - toCents(ship);
+    const source =
+      market.activeMin !== null
+        ? `lowest active new listing ($${anchor.toFixed(2)} incl. shipping${ship ? `; your ~$${ship.toFixed(2)} shipping is deducted` : ''})`
+        : `median sold price ($${anchor.toFixed(2)})`;
     if (desired < floor) {
       target = floor;
       position = 'market_below_floor';
@@ -91,9 +97,11 @@ export function effectiveBase(price: number, compareAt: number | null, useSalePr
   return !useSalePrice && compareAt && compareAt > price ? compareAt : price;
 }
 
-export function estimateProfit(price: number, opts: { cost: number | null; feePct: number; fixedFee: number; shipping: number }) {
-  const fees = +(price * (opts.feePct / 100) + opts.fixedFee).toFixed(2);
-  const net = +(price - fees - opts.shipping - (opts.cost ?? 0)).toFixed(2);
+/** eBay's final value fee applies to the total the buyer pays (item + shipping). */
+export function estimateProfit(price: number, opts: { cost: number | null; feePct: number; fixedFee: number; shipping: number; shippingCharged?: number }) {
+  const charged = opts.shippingCharged ?? 0;
+  const fees = +((price + charged) * (opts.feePct / 100) + opts.fixedFee).toFixed(2);
+  const net = +(price + charged - fees - opts.shipping - (opts.cost ?? 0)).toFixed(2);
   return { fees, net, margin: price > 0 ? +((net / price) * 100).toFixed(1) : 0, hasCost: opts.cost !== null };
 }
 

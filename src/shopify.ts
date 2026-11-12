@@ -62,6 +62,13 @@ export async function gql<T = any>(query: string, variables: Record<string, unkn
   }
 }
 
+export type InventoryItemInfo = {
+  id: string;
+  tracked: boolean;
+  unitCost: { amount: string } | null;
+  measurement?: { weight: { unit: string; value: number } | null } | null;
+};
+
 export type ShopifyVariant = {
   id: string;
   title: string;
@@ -72,7 +79,7 @@ export type ShopifyVariant = {
   inventoryQuantity: number | null;
   selectedOptions: { name: string; value: string }[];
   image: { url: string } | null;
-  inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string } | null };
+  inventoryItem: InventoryItemInfo;
 };
 
 export type ShopifyProduct = {
@@ -97,7 +104,7 @@ const VARIANT_FIELDS = `
   barcodes(first: 2) { nodes { value type } }
   selectedOptions { name value }
   media(first: 1) { nodes { preview { image { url } } } }
-  inventoryItem { id tracked unitCost { amount } }
+  inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
 `;
 
 type RawVariant = Omit<ShopifyVariant, 'barcode' | 'image'> & {
@@ -158,7 +165,7 @@ export type CatalogVariant = {
   inventoryQuantity: number | null;
   selectedOptions: { name: string; value: string }[];
   barcodes: { nodes: { value: string; type: string | null }[] };
-  inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string } | null };
+  inventoryItem: InventoryItemInfo;
   product: { id: string; title: string; vendor: string; status: string; featuredMedia: { preview: { image: { url: string; width: number | null; height: number | null } | null } | null } | null };
 };
 
@@ -174,7 +181,7 @@ export async function* allVariants(): AsyncGenerator<CatalogVariant[]> {
             id title sku inventoryQuantity
             selectedOptions { name value }
             barcodes(first: 3) { nodes { value type } }
-            inventoryItem { id tracked unitCost { amount } }
+            inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
             product { id title vendor status featuredMedia { preview { image { url width height } } } }
           }
         }
@@ -233,7 +240,7 @@ export type VariantState = {
   price: string;
   compareAtPrice: string | null;
   inventoryQuantity: number | null;
-  inventoryItem: { id: string; tracked: boolean; unitCost: { amount: string } | null };
+  inventoryItem: InventoryItemInfo;
   product: { id: string; status: string };
 };
 
@@ -245,7 +252,7 @@ export async function getVariantStates(ids: string[]): Promise<Map<string, Varia
         nodes(ids: $ids) {
           ... on ProductVariant {
             id price compareAtPrice inventoryQuantity
-            inventoryItem { id tracked unitCost { amount } }
+            inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
             product { id status }
           }
         }

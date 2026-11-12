@@ -35,12 +35,13 @@ export async function researchVariant(input: ResearchInput) {
   const gtin = gtinFields(input.barcode).aspect?.[1];
   const query = `${input.brand && !input.title.toLowerCase().includes(input.brand.toLowerCase()) ? input.brand + ' ' : ''}${input.title} ${optionsLabel(input.options)}`.trim();
   const excludeSeller = settings.ebayUsername || undefined;
+  const zip = settings.comparisonZip || undefined;
 
   let matchType = 'gtin';
-  let active = gtin ? await ebay.searchActive({ gtin, excludeSeller }) : { total: 0, items: [] as ebay.ActiveComp[] };
+  let active = gtin ? await ebay.searchActive({ gtin, excludeSeller, zip }) : { total: 0, items: [] as ebay.ActiveComp[] };
   if (!active.items.length) {
     matchType = 'title';
-    const res = await ebay.searchActive({ q: query, excludeSeller, categoryId: input.categoryId ?? undefined });
+    const res = await ebay.searchActive({ q: query, excludeSeller, categoryId: input.categoryId ?? undefined, zip });
     active = { total: res.total, items: res.items.filter((i) => titleMatches(i.title, input.brand, input.title)) };
   }
 

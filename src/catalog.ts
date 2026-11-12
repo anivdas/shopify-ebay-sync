@@ -3,7 +3,7 @@ import { logActivity } from './log.ts';
 import * as shopify from './shopify.ts';
 import { generateSku, isUsableSku, uniquify } from './sku.ts';
 
-export type IssueCode = 'sku_missing' | 'sku_duplicate' | 'sku_invalid' | 'barcode_missing' | 'barcode_invalid' | 'not_tracked' | 'no_cost' | 'no_vendor' | 'no_image' | 'small_image';
+export type IssueCode = 'sku_missing' | 'sku_duplicate' | 'sku_invalid' | 'barcode_missing' | 'barcode_invalid' | 'not_tracked' | 'no_weight' | 'no_cost' | 'no_vendor' | 'no_image' | 'small_image';
 
 export const ISSUE_INFO: Record<IssueCode, { label: string; severity: 'high' | 'medium' | 'low'; help: string }> = {
   sku_missing: { label: 'No SKU', severity: 'high', help: 'eBay sales are matched to Shopify by SKU.' },
@@ -12,6 +12,7 @@ export const ISSUE_INFO: Record<IssueCode, { label: string; severity: 'high' | '
   barcode_missing: { label: 'No UPC/EAN', severity: 'medium', help: 'Needed for exact price matching; many eBay categories require it for new items.' },
   barcode_invalid: { label: 'Invalid UPC/EAN', severity: 'medium', help: "The check digit doesn't match, or it isn't 12, 13 or 14 digits." },
   not_tracked: { label: 'Stock not tracked', severity: 'high', help: "Shopify isn't counting stock for this variant, so it can't sync." },
+  no_weight: { label: 'No weight', severity: 'medium', help: 'Calculated shipping on eBay needs the product weight (Shopify product > Shipping > Weight).' },
   no_cost: { label: 'No cost', severity: 'low', help: 'Add "Cost per item" for profit reports.' },
   no_vendor: { label: 'No brand (vendor)', severity: 'medium', help: 'The vendor is used as the eBay Brand.' },
   no_image: { label: 'No photo', severity: 'high', help: 'eBay needs at least one photo.' },
@@ -73,6 +74,7 @@ export async function scanCatalog(): Promise<{ at: string; rows: CatalogRow[] }>
       if (!r.barcode) r.issues.push('barcode_missing');
       else if (!isValidGtin(r.barcode)) r.issues.push('barcode_invalid');
       if (!r.tracked) r.issues.push('not_tracked');
+      if (!(v.inventoryItem.measurement?.weight?.value && v.inventoryItem.measurement.weight.value > 0)) r.issues.push('no_weight');
       if (r.cost === null) r.issues.push('no_cost');
       if (!r.vendor?.trim()) r.issues.push('no_vendor');
       if (!img) r.issues.push('no_image');

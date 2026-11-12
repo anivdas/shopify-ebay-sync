@@ -423,7 +423,7 @@ export function PoliciesSection({ onSaved }: { onSaved?: () => void }) {
 export function PricingSection({ onSaved }: { onSaved?: () => void }) {
   const { settings, save } = useSettings();
   const { busy, run } = useAction();
-  const keys = ['markupMinPct', 'markupMaxPct', 'undercutAmount', 'charmPricing', 'autoReprice', 'useShopifySalePrice', 'priceGuardPct', 'ebayFeePct', 'ebayFixedFee', 'avgShippingCost', 'bestOfferDefault', 'bestOfferAutoAcceptPct', 'bestOfferAutoDecline', 'soldLookbackDays'];
+  const keys = ['markupMinPct', 'markupMaxPct', 'undercutAmount', 'charmPricing', 'autoReprice', 'useShopifySalePrice', 'priceGuardPct', 'ebayFeePct', 'ebayFixedFee', 'bestOfferDefault', 'bestOfferAutoAcceptPct', 'bestOfferAutoDecline', 'soldLookbackDays'];
   const { draft, set } = useDraft(settings, keys);
   if (!settings) return null;
   const n = (k: string, label: string, opts: { step?: number; suffix?: string; hint?: ReactNode } = {}) => (
@@ -466,10 +466,10 @@ export function PricingSection({ onSaved }: { onSaved?: () => void }) {
       <div className="grid gap-4 sm:grid-cols-4">
         {n('ebayFeePct', 'eBay fee estimate', { suffix: '%', hint: 'Used until real fees arrive' })}
         {n('ebayFixedFee', 'Per-order fee', { suffix: '$' })}
-        {n('avgShippingCost', 'Your avg. shipping cost', { suffix: '$', hint: 'For profit estimates' })}
         {n('priceGuardPct', 'Safety limit', { suffix: '%', step: 1, hint: 'Hold larger price jumps for review' })}
+        {n('soldLookbackDays', 'Sold-price lookback', { suffix: 'days', step: 1, hint: '42 days = 6 weeks' })}
       </div>
-      <div className="grid gap-4 sm:grid-cols-4">{n('soldLookbackDays', 'Sold-price lookback', { suffix: 'days', step: 1, hint: '42 days = 6 weeks' })}</div>
+      <p className="text-xs text-zinc-500">Shipping charges and label costs are set under Settings, Shipping.</p>
       <Button
         variant="primary"
         loading={busy === 'save'}
@@ -487,6 +487,141 @@ export function PricingSection({ onSaved }: { onSaved?: () => void }) {
       >
         Save pricing rules
       </Button>
+    </div>
+  );
+}
+
+// ======================= Shipping (boxes for calculated shipping) =======================
+
+type BoxDraft = { id: string; name: string; length: number | ''; width: number | ''; height: number | ''; unit: 'INCH' | 'CENTIMETER'; emptyWeightOz: number | ''; packageType: string };
+const PACKAGE_TYPES: [string, string][] = [
+  ['MAILING_BOX', 'Box'],
+  ['PADDED_BAGS', 'Padded mailer / poly bag'],
+  ['PACKAGE_THICK_ENVELOPE', 'Thick envelope'],
+  ['LARGE_ENVELOPE', 'Large envelope / flat'],
+  ['LETTER', 'Letter'],
+  ['EXTRA_LARGE_PACK', 'Extra large pack'],
+  ['BULKY_GOODS', 'Bulky goods'],
+];
+
+export function ShippingSection({ onSaved }: { onSaved?: () => void }) {
+  const { settings, save } = useSettings();
+  const { busy, run } = useAction();
+  const [boxes, setBoxes] = useState<BoxDraft[]>([]);
+  const { draft, set } = useDraft(settings, ['defaultBoxId', 'buyerShippingEstimate', 'avgShippingCost', 'comparisonZip']);
+  useEffect(() => {
+    if (settings) setBoxes(JSON.parse(settings.shippingBoxes || '[]'));
+  }, [settings]);
+  if (!settings) return null;
+  const update = (i: number, k: keyof BoxDraft, v: unknown) => setBoxes((b) => b.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  const add = () => setBoxes((b) => [...b, { id: `box-${Date.now().toString(36)}`, name: '', length: '', width: '', height: '', unit: 'INCH', emptyWeightOz: '', packageType: 'MAILING_BOX' }]);
+  const valid = boxes.every((b) => b.name && Number(b.length) > 0 && Number(b.width) > 0 && Number(b.height) > 0);
+  const num = (v: string) => (v === '' ? '' : Number(v));
+
+  return (
+    <div className="space-y-6">
+      <Callout kind="info" title="Calculated shipping needs package size and weight">
+        Shopify keeps each product's <b>weight</b> (the app reads it automatically), but apps can't read your Shopify saved package sizes, so enter your boxes here once. eBay gets the box size plus product weight plus empty box weight on every listing.
+      </Callout>
+      <div className="space-y-2">
+        <span className="label">Your boxes and mailers</span>
+        <div className="scrollbar-thin overflow-x-auto rounded-xl border border-zinc-200 dark:border-white/10">
+          <table className="w-full min-w-[760px]">
+            <thead className="border-b border-zinc-100 dark:border-white/[0.06]">
+              <tr>
+                <th className="table-head">Default</th>
+                <th className="table-head">Name</th>
+                <th className="table-head">Length</th>
+                <th className="table-head">Width</th>
+                <th className="table-head">Height</th>
+                <th className="table-head">Unit</th>
+                <th className="table-head">Empty weight (oz)</th>
+                <th className="table-head">Type</th>
+                <th className="table-head" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.05]">
+              {boxes.map((b, i) => (
+                <tr key={b.id}>
+                  <td className="table-cell">
+                    <input type="radio" className="size-4 accent-brand-500" checked={draft.defaultBoxId === b.id} onChange={() => set('defaultBoxId', b.id)} />
+                  </td>
+                  <td className="table-cell">
+                    <input className="input w-36 py-1" placeholder="e.g. Small box" value={b.name} onChange={(e) => update(i, 'name', e.target.value)} />
+                  </td>
+                  {(['length', 'width', 'height'] as const).map((k) => (
+                    <td key={k} className="table-cell">
+                      <input type="number" step={0.1} min={0} className="input w-20 py-1" value={b[k]} onChange={(e) => update(i, k, num(e.target.value))} />
+                    </td>
+                  ))}
+                  <td className="table-cell">
+                    <select className="input w-20 py-1" value={b.unit} onChange={(e) => update(i, 'unit', e.target.value)}>
+                      <option value="INCH">in</option>
+                      <option value="CENTIMETER">cm</option>
+                    </select>
+                  </td>
+                  <td className="table-cell">
+                    <input type="number" step={0.1} min={0} className="input w-20 py-1" value={b.emptyWeightOz} onChange={(e) => update(i, 'emptyWeightOz', num(e.target.value))} />
+                  </td>
+                  <td className="table-cell">
+                    <select className="input w-40 py-1" value={b.packageType} onChange={(e) => update(i, 'packageType', e.target.value)}>
+                      {PACKAGE_TYPES.map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="table-cell">
+                    <button className="text-xs text-rose-500 hover:underline" onClick={() => setBoxes((x) => x.filter((_, j) => j !== i))}>
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!boxes.length && (
+                <tr>
+                  <td colSpan={9} className="table-cell text-center text-sm text-zinc-500">
+                    No boxes yet. Copy them from Shopify: Settings, Shipping and delivery, Package sizes.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Button onClick={add}>+ Add box</Button>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Field label="Typical shipping buyers pay you" hint="Average calculated shipping charge. Used to compare your price + shipping against competitors, and for profit.">
+          <input type="number" step={0.01} min={0} className="input" value={draft.buyerShippingEstimate ?? 0} onChange={(e) => set('buyerShippingEstimate', Number(e.target.value))} />
+        </Field>
+        <Field label="Your average label cost" hint="What postage costs you per order (for profit estimates).">
+          <input type="number" step={0.01} min={0} className="input" value={draft.avgShippingCost ?? 0} onChange={(e) => set('avgShippingCost', Number(e.target.value))} />
+        </Field>
+        <Field label="Typical buyer ZIP code" hint="Competitors' calculated shipping is quoted to this ZIP. A big-city ZIP far from you (e.g. 10001) is a fair middle.">
+          <input className="input" maxLength={10} placeholder="e.g. 10001" value={draft.comparisonZip ?? ''} onChange={(e) => set('comparisonZip', e.target.value.trim())} />
+        </Field>
+      </div>
+      <Button
+        variant="primary"
+        disabled={!valid}
+        loading={busy === 'save'}
+        onClick={() =>
+          run(
+            'save',
+            async () => {
+              const clean = boxes.map((b) => ({ ...b, length: Number(b.length), width: Number(b.width), height: Number(b.height), emptyWeightOz: Number(b.emptyWeightOz || 0) }));
+              const defaultBoxId = clean.some((b) => b.id === draft.defaultBoxId) ? draft.defaultBoxId : (clean[0]?.id ?? '');
+              await save({ ...draft, defaultBoxId, shippingBoxes: JSON.stringify(clean) });
+              onSaved?.();
+            },
+            'Shipping settings saved',
+          )
+        }
+      >
+        Save shipping settings
+      </Button>
+      {!valid && <p className="text-xs text-amber-600">Every box needs a name and all three dimensions.</p>}
     </div>
   );
 }

@@ -2,13 +2,13 @@ import { Check, ChevronRight, PartyPopper } from 'lucide-react';
 import { useState } from 'react';
 import { useApi } from '../api.ts';
 import { Badge, Button, Callout, cx, Link, PageHeader, Spinner } from '../ui.tsx';
-import { EbayConnectSection, EbayKeysSection, PoliciesSection, PricingSection, ShopifySection, SyncSection } from './sections.tsx';
+import { EbayConnectSection, EbayKeysSection, PoliciesSection, PricingSection, ShippingSection, ShopifySection, SyncSection } from './sections.tsx';
 
 const STEPS = [
   { key: 'shopify', title: 'Connect Shopify', blurb: 'Lets the app read your products and adjust stock when items sell on eBay.' },
   { key: 'ebayKeys', title: 'eBay developer keys', blurb: 'Free keys that let this app talk to eBay for you.' },
   { key: 'ebayConnect', title: 'Connect eBay account', blurb: 'Sign in to eBay and approve access for this app.' },
-  { key: 'policies', title: 'Shipping & policies', blurb: 'Default shipping, payment and return policies, and where you ship from.' },
+  { key: 'policies', title: 'Shipping & policies', blurb: 'Default shipping, payment and return policies, where you ship from, and your box sizes.' },
   { key: 'pricing', title: 'Pricing rules', blurb: 'How your eBay prices relate to Shopify, and how repricing works.' },
   { key: 'extras', title: 'Extras (optional)', blurb: 'Phone alerts, instant updates, and sold-price data.' },
 ];
@@ -78,7 +78,15 @@ export function Setup({ onChange }: { onChange: () => void }) {
           {step === 'shopify' && <ShopifySection onSaved={refresh} />}
           {step === 'ebayKeys' && <EbayKeysSection onSaved={refresh} />}
           {step === 'ebayConnect' && <EbayConnectSection onSaved={refresh} />}
-          {step === 'policies' && <PoliciesSection onSaved={refresh} />}
+          {step === 'policies' && (
+            <>
+              <PoliciesSection onSaved={refresh} />
+              <div className="mt-8 border-t border-zinc-100 pt-6 dark:border-white/[0.06]">
+                <h3 className="mb-4 text-sm font-semibold">Shipping boxes (for calculated shipping)</h3>
+                <ShippingSection onSaved={refresh} />
+              </div>
+            </>
+          )}
           {step === 'pricing' && <PricingSection onSaved={refresh} />}
           {step === 'extras' && <Extras status={status.data} />}
           {step !== 'extras' && (

@@ -17,12 +17,15 @@ const EMPTY = {
   best_offer_enabled: null as number | null,
   markup_min_pct: null as number | null,
   markup_max_pct: null as number | null,
+  box_id: '' as string | null,
 };
 
 export function Profiles() {
   const list = useApi('/api/profiles');
   const status = useApi('/api/status');
   const policies = useApi(status.data?.ebay?.connected ? '/api/ebay/policies' : null);
+  const settingsQ = useApi('/api/settings');
+  const boxes = JSON.parse(settingsQ.data?.settings?.shippingBoxes || '[]') as { id: string; name: string; length: number; width: number; height: number; unit: string }[];
   const [edit, setEdit] = useState<(typeof EMPTY & { id?: number }) | null>(null);
   const [catResults, setCatResults] = useState<any[] | null>(null);
   const [aspectText, setAspectText] = useState('');
@@ -179,6 +182,16 @@ export function Profiles() {
                 <input type="number" step={0.5} className="input" value={edit.markup_max_pct ?? ''} onChange={(e) => set('markup_max_pct', e.target.value === '' ? null : Number(e.target.value))} />
               </Field>
             </div>
+            <Field label="Shipping box" hint="Empty = your default box (Settings > Shipping)">
+              <select className="input" value={edit.box_id ?? ''} onChange={(e) => set('box_id', e.target.value)}>
+                <option value="">Default box</option>
+                {boxes.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.length}×{b.width}×{b.height} {b.unit === 'CENTIMETER' ? 'cm' : 'in'})
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Toggle checked={!!edit.best_offer_enabled} onChange={(v) => set('best_offer_enabled', v ? 1 : 0)} label="Enable Best Offer" description="Single-variation listings only" />
             <Field label="Title template" hint="Empty = default. Placeholders: {brand} {title} {options} {type} {sku}">
               <input className="input font-mono" value={edit.title_template ?? ''} onChange={(e) => set('title_template', e.target.value)} placeholder="{brand} {title} {options}" />

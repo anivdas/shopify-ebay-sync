@@ -10,21 +10,26 @@ Object.assign(process.env, { SHOPIFY_SHOP: 's', SHOPIFY_ACCESS_TOKEN: 't' });
 const { updateSettings } = await import('../src/db.ts');
 const catalog = await import('../src/catalog.ts');
 
-const variant = (n: number, o: Partial<{ sku: string | null; barcode: string; tracked: boolean; cost: string | null; title: string; vendor: string; productId: string; option: string }>) => ({
+const variant = (n: number, o: Partial<{ sku: string | null; barcode: string; tracked: boolean; cost: string | null; title: string; vendor: string; productId: string; option: string; weightless: boolean }>) => ({
   id: `gid://shopify/ProductVariant/${n}`,
   title: o.option ?? 'Default Title',
   sku: o.sku ?? null,
   inventoryQuantity: 3,
   selectedOptions: [{ name: o.option ? 'Color' : 'Title', value: o.option ?? 'Default Title' }],
   barcodes: { nodes: o.barcode ? [{ value: o.barcode, type: null }] : [] },
-  inventoryItem: { id: `gid://shopify/InventoryItem/${n}`, tracked: o.tracked ?? true, unitCost: o.cost === null ? null : { amount: o.cost ?? '5.00' } },
+  inventoryItem: {
+    id: `gid://shopify/InventoryItem/${n}`,
+    tracked: o.tracked ?? true,
+    unitCost: o.cost === null ? null : { amount: o.cost ?? '5.00' },
+    measurement: { weight: o.weightless ? null : { unit: 'POUNDS', value: 1.5 } },
+  },
   product: { id: o.productId ?? `gid://shopify/Product/${n}`, title: o.title ?? 'WH-1000XM5 Headphones', vendor: o.vendor ?? 'Sony', status: 'ACTIVE', featuredMedia: { preview: { image: { url: 'https://cdn/x.jpg', width: 1000, height: 1000 } } } },
 });
 
 const store = [
   variant(1, { sku: 'SONY-1', barcode: '012345678905', productId: 'P1', option: 'Black' }),
   variant(2, { sku: null, barcode: '012345678906', productId: 'P1', option: 'Silver' }),
-  variant(3, { sku: 'DUP', title: 'Mug', vendor: 'Acme', tracked: false, cost: null }),
+  variant(3, { sku: 'DUP', title: 'Mug', vendor: 'Acme', tracked: false, cost: null, weightless: true }),
   variant(4, { sku: 'dup', title: 'Cup', vendor: 'Acme' }),
   variant(5, { sku: 'has space', title: 'Plate', vendor: '' }),
 ];
@@ -52,7 +57,7 @@ test('scan finds the problems', async () => {
   const issues = (n: number) => rows.find((r) => r.variantId.endsWith(`/${n}`))!.issues;
   assert.deepEqual(issues(1), []);
   assert.deepEqual(issues(2), ['sku_missing', 'barcode_invalid']);
-  assert.ok(issues(3).includes('sku_duplicate') && issues(3).includes('not_tracked') && issues(3).includes('no_cost'));
+  assert.ok(issues(3).includes('sku_duplicate') && issues(3).includes('not_tracked') && issues(3).includes('no_cost') && issues(3).includes('no_weight'));
   assert.ok(issues(4).includes('sku_duplicate'));
   assert.ok(issues(5).includes('sku_invalid') && issues(5).includes('no_vendor'));
   const s = catalog.summarize(rows);

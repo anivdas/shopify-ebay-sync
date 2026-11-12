@@ -185,6 +185,16 @@ CREATE TABLE IF NOT EXISTS retry_queue (
 );
 `);
 
+// ---- Lightweight migrations for columns added after the first release ----
+function addColumn(table: string, column: string, definition: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+addColumn('profiles', 'box_id', 'TEXT');
+addColumn('ebay_listings', 'box_id', 'TEXT');
+addColumn('listing_items', 'weight_value', 'REAL');
+addColumn('listing_items', 'weight_unit', 'TEXT');
+
 export type Row = Record<string, any>;
 
 export const all = <T = Row>(sql: string, ...params: any[]) => db.prepare(sql).all(...params) as T[];
@@ -229,7 +239,13 @@ export const defaultSettings = {
   // eBay fees (estimate until real fees arrive from the Finances API)
   ebayFeePct: 13.6,
   ebayFixedFee: 0.4,
+  // shipping: what buyers typically pay you (calculated shipping varies) and what labels cost you
+  buyerShippingEstimate: 0,
   avgShippingCost: 0,
+  comparisonZip: '',
+  // JSON array of { id, name, length, width, height, unit: 'INCH'|'CENTIMETER', emptyWeightOz, packageType }
+  shippingBoxes: '[]',
+  defaultBoxId: '',
   // inventory
   quantityBuffer: 0,
   maxListQuantity: 0,

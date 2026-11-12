@@ -114,6 +114,8 @@ When you first open the app you create a dashboard password. The wizard then wal
 3. **Connect your eBay account.** Sign in to eBay and click Agree.
    - If your app isn't on HTTPS, copy the address of the page eBay sends you to and paste it into the app.
 4. **Shipping and policies.** Choose default shipping, payment and return policies, and where you ship from.
+   - **Calculated shipping:** enter your box sizes once (Shopify doesn't let apps read saved package sizes). The app sends each listing's box dimensions plus the product weight from Shopify plus the empty box weight to eBay.
+   - Also set the **typical shipping buyers pay you**, so price comparisons use your price + shipping against competitors' price + shipping.
 5. **Pricing rules.** Set the markup range, automatic repricing, Best Offer and fees.
 6. **Extras (optional):**
    - phone alerts;

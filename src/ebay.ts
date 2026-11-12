@@ -249,6 +249,11 @@ export async function getAspects(categoryId: string): Promise<Aspect[]> {
 export type InventoryItemPayload = {
   availability: { shipToLocationAvailability: { quantity: number } };
   condition: string;
+  packageWeightAndSize?: {
+    packageType?: string;
+    dimensions?: { length: number; width: number; height: number; unit: string };
+    weight?: { value: number; unit: string };
+  };
   product: {
     title: string;
     description?: string;
@@ -385,12 +390,14 @@ export async function bulkUpdatePriceQuantity(updates: PriceQtyUpdate[]) {
 // ---------- Browse (active comps) ----------
 export type ActiveComp = { itemId: string; title: string; price: number; shipping: number; total: number; seller: string; url: string; image?: string };
 
-export async function searchActive(params: { gtin?: string; q?: string; excludeSeller?: string; categoryId?: string }): Promise<{ total: number; items: ActiveComp[] }> {
+export async function searchActive(params: { gtin?: string; q?: string; excludeSeller?: string; categoryId?: string; zip?: string }): Promise<{ total: number; items: ActiveComp[] }> {
   const filters = ['conditionIds:{1000}', 'buyingOptions:{FIXED_PRICE}', `deliveryCountry:${ebayConf().country}`];
   if (params.excludeSeller) filters.push(`excludeSellers:{${params.excludeSeller}}`);
   const res = await ebay<{ total?: number; itemSummaries?: any[] }>('GET', '/buy/browse/v1/item_summary/search', {
     auth: 'app',
     query: { gtin: params.gtin, q: params.gtin ? undefined : params.q, category_ids: params.categoryId, filter: filters.join(','), limit: 100 },
+    // Quotes competitors' calculated shipping to a realistic buyer location
+    headers: params.zip ? { 'X-EBAY-C-ENDUSERCTX': `contextualLocation=${encodeURIComponent(`country=${ebayConf().country},zip=${params.zip}`)}` } : undefined,
   });
   const items = (res.itemSummaries ?? [])
     .filter((i) => i.price?.currency === ebayConf().currency)

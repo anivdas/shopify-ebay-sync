@@ -13,6 +13,7 @@ import {
 } from './listing-builder.ts';
 import { logActivity } from './log.ts';
 import { bestOfferThresholds, effectiveBase, priceAtPct, type PricingRules } from './pricing.ts';
+import { getBoxes, packageWeightAndSize, resolveBox, toOunces } from './shipping.ts';
 import * as shopify from './shopify.ts';
 
 export type Listing = {
@@ -36,6 +37,7 @@ export type Listing = {
   return_policy_id: string | null;
   merchant_location_key: string | null;
   best_offer_enabled: number;
+  box_id: string | null;
   locked_fields: string;
   ebay_listing_id: string | null;
   status: string;
@@ -64,6 +66,8 @@ export type Item = {
   shopify_status: string | null;
   inventory_tracked: number;
   unit_cost: number | null;
+  weight_value: number | null;
+  weight_unit: string | null;
   ebay_price: number | null;
   ebay_qty: number | null;
   markup_pct: number | null;
@@ -90,6 +94,7 @@ export type Profile = {
   best_offer_enabled: number | null;
   markup_min_pct: number | null;
   markup_max_pct: number | null;
+  box_id: string | null;
 };
 
 export const getListing = (id: number) => get<Listing>('SELECT * FROM ebay_listings WHERE id = ?', id);
@@ -104,6 +109,7 @@ export function rulesFor(listing: Pick<Listing, 'profile_id'>, settings: Setting
     maxPct: profile?.markup_max_pct ?? settings.markupMaxPct,
     undercut: settings.undercutAmount,
     charm: settings.charmPricing,
+    ownShipping: settings.buyerShippingEstimate,
   };
 }
 
@@ -142,6 +148,7 @@ const PROFILE_FIELDS = [
   'best_offer_enabled',
   'markup_min_pct',
   'markup_max_pct',
+  'box_id',
 ] as const;
 
 export function saveProfile(input: Partial<Profile> & { name: string }, id?: number): Profile {
@@ -179,6 +186,8 @@ function itemFromVariant(v: shopify.ShopifyVariant) {
     shopify_qty: v.inventoryQuantity ?? 0,
     inventory_tracked: v.inventoryItem.tracked ? 1 : 0,
     unit_cost: v.inventoryItem.unitCost ? Number(v.inventoryItem.unitCost.amount) : null,
+    weight_value: v.inventoryItem.measurement?.weight?.value ?? null,
+    weight_unit: v.inventoryItem.measurement?.weight?.unit ?? null,
   };
 }
 
@@ -247,8 +256,8 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
     const listingId = tx(() => {
       const res = run(
         `INSERT INTO ebay_listings (kind, group_key, shopify_product_id, product_title, brand, profile_id, title, category_id, category_name,
-           aspects, description_html, image_urls, varies_by, fulfillment_policy_id, payment_policy_id, return_policy_id, merchant_location_key, best_offer_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           aspects, description_html, image_urls, varies_by, fulfillment_policy_id, payment_policy_id, return_policy_id, merchant_location_key, best_offer_enabled, box_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         asGroup ? 'group' : 'single',
         groupKey,
         product.id,
@@ -267,14 +276,15 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
         profile?.return_policy_id || settings.returnPolicyId || null,
         profile?.merchant_location_key || settings.merchantLocationKey || null,
         !asGroup && (profile?.best_offer_enabled ?? (settings.bestOfferDefault ? 1 : 0)) ? 1 : 0,
+        profile?.box_id || null,
       );
       const id = Number(res.lastInsertRowid);
       for (const v of groupVariants) {
         const it = itemFromVariant(v);
         run(
           `INSERT INTO listing_items (listing_id, shopify_variant_id, shopify_inventory_item_id, sku, variant_title, options, barcode, image_url,
-             shopify_price, shopify_compare_at, shopify_qty, shopify_status, inventory_tracked, unit_cost)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             shopify_price, shopify_compare_at, shopify_qty, shopify_status, inventory_tracked, unit_cost, weight_value, weight_unit)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           id,
           it.shopify_variant_id,
           it.shopify_inventory_item_id,
@@ -289,6 +299,8 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
           product.status,
           it.inventory_tracked,
           it.unit_cost,
+          it.weight_value,
+          it.weight_unit,
         );
       }
       return id;
@@ -315,6 +327,7 @@ const LISTING_EDITABLE = [
   'best_offer_enabled',
   'locked_fields',
   'profile_id',
+  'box_id',
 ] as const;
 
 export function updateListing(id: number, patch: Record<string, unknown>) {
@@ -384,7 +397,7 @@ export async function refreshFromShopify(id: number) {
     const it = itemFromVariant(v);
     run(
       `UPDATE listing_items SET shopify_price = ?, shopify_compare_at = ?, shopify_qty = ?, shopify_status = ?, inventory_tracked = ?, unit_cost = ?,
-         barcode = ?, image_url = ?, options = ?, variant_title = ? WHERE id = ?`,
+         barcode = ?, image_url = ?, options = ?, variant_title = ?, weight_value = ?, weight_unit = ? WHERE id = ?`,
       it.shopify_price,
       it.shopify_compare_at,
       it.shopify_qty,
@@ -395,6 +408,8 @@ export async function refreshFromShopify(id: number) {
       it.image_url,
       JSON.stringify(it.options),
       it.variant_title,
+      it.weight_value,
+      it.weight_unit,
       item.id,
     );
   }
@@ -456,8 +471,17 @@ export async function validateListing(id: number): Promise<Issue[]> {
     const combos = new Set(items.map((i) => varies.map((n) => json<Record<string, string>>(i.options, {})[n]).join('|')));
     if (combos.size !== items.length) err('varies_by', 'Two variants have the same option values; eBay needs each variation to be unique');
   }
+  const box = resolveBox(settings, listing.box_id, getProfile(listing.profile_id)?.box_id);
+  if (!box)
+    warn(
+      'box_id',
+      getBoxes(settings).length
+        ? 'No package size chosen. Calculated shipping needs box dimensions (pick one under Policies & options).'
+        : 'No shipping boxes set up yet (Settings > Shipping). Calculated shipping policies need box dimensions.',
+    );
   const rules = rulesFor(listing, settings);
   for (const item of items) {
+    if (toOunces(item.weight_value, item.weight_unit) <= 0) warn(`items.${item.id}`, `${item.variant_title ?? item.sku}: no weight in Shopify (needed for calculated shipping)`);
     const price = targetPrice(item, rules, settings);
     if (!price || price <= 0) err(`items.${item.id}`, `${item.variant_title ?? item.sku}: price is missing`);
     if (item.shopify_status && item.shopify_status !== 'ACTIVE') warn(`items.${item.id}`, `${item.variant_title ?? item.sku}: Shopify product is ${item.shopify_status.toLowerCase()} (will list with 0 quantity)`);
@@ -469,7 +493,9 @@ export async function validateListing(id: number): Promise<Issue[]> {
 
 // ---------------- Publish / end ----------------
 
-function inventoryPayload(listing: Listing, item: Item, qty: number): ebay.InventoryItemPayload {
+function inventoryPayload(listing: Listing, item: Item, qty: number, settings: Settings): ebay.InventoryItemPayload {
+  const box = resolveBox(settings, listing.box_id, getProfile(listing.profile_id)?.box_id);
+  const pkg = packageWeightAndSize(box, toOunces(item.weight_value, item.weight_unit));
   const shared = json<Record<string, string[]>>(listing.aspects, {});
   const opts = json<Record<string, string>>(item.options, {});
   const aspects: Record<string, string[]> = { ...shared };
@@ -481,6 +507,7 @@ function inventoryPayload(listing: Listing, item: Item, qty: number): ebay.Inven
   return {
     availability: { shipToLocationAvailability: { quantity: qty } },
     condition: listing.condition || 'NEW',
+    ...(pkg ? { packageWeightAndSize: pkg } : {}),
     product: {
       title: listing.title,
       description: stripHtml(listing.description_html).slice(0, 3990),
@@ -559,7 +586,7 @@ export async function publishListing(id: number, opts: { skipValidation?: boolea
   const rules = rulesFor(listing, settings);
   try {
     // Order matters for eBay: inventory items -> (item group) -> offers -> publish
-    for (const item of items) await ebay.putInventoryItem(item.sku, inventoryPayload(listing, item, targetQuantity(item, settings)));
+    for (const item of items) await ebay.putInventoryItem(item.sku, inventoryPayload(listing, item, targetQuantity(item, settings), settings));
     if (listing.kind === 'group') await ebay.putItemGroup(listing.group_key!, groupPayload(listing, items));
     for (const item of items) {
       const qty = targetQuantity(item, settings);

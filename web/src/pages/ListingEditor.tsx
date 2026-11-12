@@ -13,6 +13,8 @@ export function ListingEditor({ id }: { id: number }) {
   const profiles = useApi('/api/profiles');
   const policies = useApi(status.data?.ebay?.connected ? '/api/ebay/policies' : null);
   const locations = useApi(status.data?.ebay?.connected ? '/api/ebay/locations' : null);
+  const settingsQ = useApi('/api/settings');
+  const boxes = JSON.parse(settingsQ.data?.settings?.shippingBoxes || '[]') as { id: string; name: string; length: number; width: number; height: number; unit: string }[];
   const [draft, setDraft] = useState<any>(null);
   const [items, setItems] = useState<Record<number, any>>({});
   const [issues, setIssues] = useState<any[] | null>(null);
@@ -36,7 +38,7 @@ export function ListingEditor({ id }: { id: number }) {
 
   const dirty = useMemo(() => {
     if (!l || !draft) return false;
-    const keys = ['title', 'category_id', 'aspects', 'description_html', 'image_urls', 'varies_by', 'fulfillment_policy_id', 'payment_policy_id', 'return_policy_id', 'merchant_location_key', 'best_offer_enabled', 'locked_fields', 'profile_id'];
+    const keys = ['title', 'category_id', 'aspects', 'description_html', 'image_urls', 'varies_by', 'fulfillment_policy_id', 'payment_policy_id', 'return_policy_id', 'merchant_location_key', 'best_offer_enabled', 'locked_fields', 'profile_id', 'box_id'];
     return keys.some((k) => JSON.stringify(draft[k]) !== JSON.stringify(l[k])) || Object.keys(items).length > 0;
   }, [draft, l, items]);
 
@@ -312,6 +314,16 @@ export function ListingEditor({ id }: { id: number }) {
                   {(locations.data?.locations ?? []).map((x: any) => (
                     <option key={x.merchantLocationKey} value={x.merchantLocationKey}>
                       {x.name ?? x.merchantLocationKey}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Shipping box" hint="Sent to eBay with the product weight for calculated shipping">
+                <select className="input" value={draft.box_id ?? ''} onChange={(e) => set('box_id', e.target.value)}>
+                  <option value="">Default (profile or Settings)</option>
+                  {boxes.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.length}×{b.width}×{b.height} {b.unit === 'CENTIMETER' ? 'cm' : 'in'})
                     </option>
                   ))}
                 </select>

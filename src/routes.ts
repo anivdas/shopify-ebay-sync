@@ -314,7 +314,9 @@ function enrichItem(item: L.Item, listing: L.Listing) {
     current_pct: base && price ? +(((price / base) - 1) * 100).toFixed(2) : null,
     floor: base ? +(base * (1 + rules.minPct / 100)).toFixed(2) : null,
     ceiling: base ? +(base * (1 + rules.maxPct / 100)).toFixed(2) : null,
-    profit: price ? estimateProfit(price, { cost: item.unit_cost, feePct, fixedFee: lineFees?.gross ? 0 : settings.ebayFixedFee, shipping: settings.avgShippingCost }) : null,
+    profit: price
+      ? estimateProfit(price, { cost: item.unit_cost, feePct, fixedFee: lineFees?.gross ? 0 : settings.ebayFixedFee, shipping: settings.avgShippingCost, shippingCharged: settings.buyerShippingEstimate })
+      : null,
     fee_source: lineFees?.gross ? 'actual' : 'estimate',
     market: snap,
     sold_30d: get<{ n: number }>(`SELECT COALESCE(SUM(quantity),0) AS n FROM processed_orders WHERE sku = ? AND status = 'applied' AND ordered_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 days')`, item.sku)!.n,
@@ -430,7 +432,7 @@ router.post('/api/market/check', async ({ body }) => {
   const variant = product?.variants.nodes.find((v) => v.id === body.variantId) ?? product?.variants.nodes[0];
   if (!product || !variant) throw new HttpError(404, 'Product not found');
   const s = getSettings();
-  const rules = { minPct: s.markupMinPct, maxPct: s.markupMaxPct, undercut: s.undercutAmount, charm: s.charmPricing };
+  const rules = { minPct: s.markupMinPct, maxPct: s.markupMaxPct, undercut: s.undercutAmount, charm: s.charmPricing, ownShipping: s.buyerShippingEstimate };
   const base = effectiveBase(Number(variant.price), variant.compareAtPrice ? Number(variant.compareAtPrice) : null, s.useShopifySalePrice);
   await researchVariant({
     variantId: variant.id,

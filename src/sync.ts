@@ -40,14 +40,18 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
     item.shopify_status = s ? s.product.status : 'DELETED';
     item.inventory_tracked = s ? (s.inventoryItem.tracked ? 1 : 0) : 1;
     item.unit_cost = s?.inventoryItem.unitCost ? Number(s.inventoryItem.unitCost.amount) : item.unit_cost;
+    const weight = s?.inventoryItem.measurement?.weight;
     run(
-      'UPDATE listing_items SET shopify_price = ?, shopify_compare_at = ?, shopify_qty = ?, shopify_status = ?, inventory_tracked = ?, unit_cost = ? WHERE id = ?',
+      `UPDATE listing_items SET shopify_price = ?, shopify_compare_at = ?, shopify_qty = ?, shopify_status = ?, inventory_tracked = ?, unit_cost = ?,
+         weight_value = COALESCE(?, weight_value), weight_unit = COALESCE(?, weight_unit) WHERE id = ?`,
       item.shopify_price,
       item.shopify_compare_at,
       item.shopify_qty,
       item.shopify_status,
       item.inventory_tracked,
       item.unit_cost,
+      weight?.value ?? null,
+      weight?.unit ?? null,
       item.id,
     );
     if (!s) logActivity('warn', 'alert.shopify', `Shopify variant for SKU ${item.sku} was deleted; setting eBay quantity to 0`);
