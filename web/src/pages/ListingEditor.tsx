@@ -342,6 +342,7 @@ export function ListingEditor({ id }: { id: number }) {
                   ))}
                 </select>
               </Field>
+              <PackageSummary listing={l} saved={draft.box_id === l.box_id} />
               <Toggle
                 checked={!!draft.best_offer_enabled}
                 disabled={l.kind === 'group'}
@@ -439,6 +440,38 @@ function CategoryPicker({ value, defaultQuery, onChange }: { value: { id: string
           {!results.length && <li className="px-3 py-3 text-sm text-zinc-500">No suggestions. Try different words.</li>}
         </ul>
       )}
+    </div>
+  );
+}
+
+const fmtOz = (oz: number) => (oz >= 16 ? `${Math.floor(oz / 16)} lb ${+(oz % 16).toFixed(1)} oz` : `${+oz.toFixed(1)} oz`);
+
+/** Weight and box sent to eBay for calculated shipping (computed by the server from Shopify weight + box). */
+function PackageSummary({ listing, saved }: { listing: any; saved: boolean }) {
+  const box = listing.box;
+  return (
+    <div className="rounded-xl bg-zinc-50 p-3 text-xs dark:bg-white/[0.03]">
+      <div className="mb-1.5 font-semibold text-zinc-600 dark:text-zinc-300">Package sent to eBay</div>
+      {listing.items.map((i: any) => (
+        <div key={i.id} className="flex flex-wrap items-baseline justify-between gap-x-3 py-0.5">
+          {listing.items.length > 1 && <span className="text-zinc-500">{i.variant_title ?? i.sku}</span>}
+          {i.product_oz > 0 ? (
+            <span>
+              <b>{i.package?.weight ? `${i.package.weight.value} lb` : '-'}</b>
+              <span className="text-zinc-500">
+                {' '}
+                = {fmtOz(i.product_oz)} (Shopify){box?.emptyWeightOz ? ` + ${fmtOz(box.emptyWeightOz)} box` : ''}, rounded up
+              </span>
+            </span>
+          ) : (
+            <span className="text-rose-600 dark:text-rose-400">No weight in Shopify: add it there, then Refresh from Shopify</span>
+          )}
+        </div>
+      ))}
+      <div className="mt-1 text-zinc-500">
+        {box ? `${box.name}: ${box.length}×${box.width}×${box.height} ${box.unit === 'CENTIMETER' ? 'cm' : 'in'}` : 'No box set: add one in Settings → Shipping'}
+        {!saved && ' (save to update)'}
+      </div>
     </div>
   );
 }
