@@ -1,13 +1,16 @@
 import { randomBytes } from 'node:crypto';
+import { runAutoList } from './autolist.ts';
 import * as catalog from './catalog.ts';
+import { eligibility, listOverrides, setOverride } from './rules.ts';
+import { smartTitle } from './listing-builder.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
-import { all, get, getSettings, getState, json, setState, updateSettings } from './db.ts';
+import { all, get, getSettings, getState, json, run, setState, updateSettings } from './db.ts';
 import * as ebay from './ebay.ts';
 import { HttpError, num, Router, type Ctx } from './http.ts';
 import { enqueue, JOBS, jobStatus, queueWebhookSync, runJob } from './jobs.ts';
 import * as L from './listings.ts';
-import { logActivity } from './log.ts';
+import { logActivity, sendAlert } from './log.ts';
 import { effectiveBase, estimateProfit, recommend } from './pricing.ts';
 import { latestSnapshot, researchItem, researchVariant, snapshotHistory } from './research.ts';
 import * as shopify from './shopify.ts';
@@ -161,11 +164,18 @@ router.post('/api/ebay/code', async ({ body }) => {
   const input = String(body?.code ?? '').trim();
   let code = input;
   try {
-    const u = new URL(input);
-    code = u.searchParams.get('code') ?? '';
-  } catch {}
+    // A pasted URL: URLSearchParams already decodes the value, so don't decode again
+    code = new URL(input).searchParams.get('code') ?? '';
+  } catch {
+    // A bare code: decode only if it looks URL-encoded and decodes cleanly
+    if (/%[0-9A-Fa-f]{2}/.test(code)) {
+      try {
+        code = decodeURIComponent(code);
+      } catch {}
+    }
+  }
   if (!code) throw new HttpError(400, 'Paste the full address from your browser after approving on eBay (it contains "code=")');
-  await finishEbayConnect(decodeURIComponent(code));
+  await finishEbayConnect(code);
   return { ok: true };
 });
 
@@ -201,6 +211,8 @@ router.get('/api/shopify/products', async ({ query }) => {
        FROM ebay_listings l JOIN listing_items i ON i.listing_id = l.id GROUP BY l.shopify_product_id`,
     ).map((r) => [r.shopify_product_id, r]),
   );
+  const settings = getSettings();
+  const overrides = new Map(listOverrides().map((o) => [o.product_id, o.mode]));
   return {
     pageInfo: page.pageInfo,
     products: page.nodes.map((p) => ({
@@ -214,8 +226,40 @@ router.get('/api/shopify/products', async ({ query }) => {
       maxPrice: Number(p.priceRangeV2.maxVariantPrice.amount),
       image: p.featuredMedia?.preview?.image?.url ?? null,
       linked: linked.get(p.id) ?? null,
+      override: overrides.get(p.id) ?? null,
+      ...eligibility(p, settings, overrides.get(p.id) ?? null),
     })),
   };
+});
+
+// ============ Rules: per-product exceptions ============
+
+router.get('/api/rules/overrides', () => ({ overrides: listOverrides() }));
+
+/** mode: 'allow' (list even if a rule matches), 'block' (never list) or null (follow the rules). */
+router.post('/api/products/:id/override', async ({ params, body }) => {
+  const mode = body?.mode === 'allow' || body?.mode === 'block' ? body.mode : null;
+  const product = await shopify.getProduct(params.id);
+  if (!product) throw new HttpError(404, 'Product not found');
+  setOverride(product.id, mode, product.title);
+  const settings = getSettings();
+  const result = eligibility({ ...product, id: product.id }, settings, mode);
+  run('UPDATE ebay_listings SET excluded_reason = ? WHERE shopify_product_id = ?', result.excluded, product.id);
+  logActivity('info', 'rules', `${mode === 'allow' ? 'Allowed' : mode === 'block' ? 'Blocked' : 'Cleared exception for'} "${product.title}"`);
+  // Apply right away: pause/resume live listings, publish waiting drafts / auto-list
+  enqueue('rules', async () => {
+    await import('./sync.ts').then((m) => m.syncShopifyToEbay({ productIds: [product.id] }));
+    await runAutoList();
+  }).catch(() => undefined);
+  return { ok: true, ...result };
+});
+
+router.post('/api/tools/title-preview', ({ body }) => smartTitle(String(body?.title ?? '')));
+
+router.post('/api/alerts/test', async () => {
+  if (!getSettings().alertWebhookUrl) throw new HttpError(400, 'Enter and save an alert webhook URL first');
+  await sendAlert('Test alert: notifications are working.');
+  return { ok: true };
 });
 
 router.get('/api/shopify/products/:id', async ({ params }) => {
@@ -358,7 +402,9 @@ router.post('/api/listings/bulk', async ({ body }) => {
   const errors: { productId: string; error: string }[] = [];
   for (const p of (body?.products ?? []) as { productId: string; variantIds?: string[] }[]) {
     try {
-      created.push(...(await L.createDrafts({ productId: p.productId, variantIds: p.variantIds, mode: body.mode, profileId: body.profileId })));
+      const ids = await L.createDrafts({ productId: p.productId, variantIds: p.variantIds, mode: body.mode, profileId: body.profileId });
+      // Excluded products become "waiting" drafts that publish once the rule stops matching
+      created.push(...ids);
     } catch (e) {
       errors.push({ productId: p.productId, error: (e as Error).message });
     }

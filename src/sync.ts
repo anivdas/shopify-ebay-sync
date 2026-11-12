@@ -7,9 +7,10 @@ import * as ebay from './ebay.ts';
 import { getItems, getListing, offerPayload, rulesFor, targetPrice, targetQuantity, type Item, type Listing } from './listings.ts';
 import { logActivity, pruneActivity } from './log.ts';
 import { guardPriceChange } from './pricing.ts';
+import { excludedReasonFor, type RuleProduct } from './rules.ts';
 import * as shopify from './shopify.ts';
 
-const LIVE = `('published','out_of_stock')`;
+const LIVE = `('published','out_of_stock','paused')`;
 
 // ======================= Shopify -> eBay =======================
 
@@ -30,6 +31,7 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
   const updates: ebay.PriceQtyUpdate[] = [];
   const fullOfferUpdates: { item: Item; listing: Listing; price: number; qty: number }[] = [];
   const touched = new Set<number>();
+  const checkedListings = new Map<number, string | null>();
 
   for (const item of items) {
     const s = states.get(item.shopify_variant_id);
@@ -59,8 +61,19 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
       logActivity('warn', 'alert.lowstock', `Low stock: ${item.sku} has ${item.shopify_qty} left in Shopify`);
 
     const listing = getListing(item.listing_id)!;
+    // Exclusion rules (e.g. "preorder" in the title): show 0 on eBay while they match, resume automatically after
+    if (s?.product.title !== undefined && !checkedListings.has(listing.id)) {
+      const reason = excludedReasonFor(s.product as RuleProduct, settings);
+      checkedListings.set(listing.id, reason);
+      if (reason !== listing.excluded_reason) {
+        run('UPDATE ebay_listings SET excluded_reason = ? WHERE id = ?', reason, listing.id);
+        logActivity(reason ? 'warn' : 'info', reason ? 'alert.excluded' : 'rules', reason ? `Paused "${listing.title}" on eBay: ${reason}` : `"${listing.title}" no longer matches an exclusion rule; resuming on eBay`);
+        listing.excluded_reason = reason;
+        touched.add(listing.id);
+      }
+    }
     const rules = rulesFor(listing, settings);
-    const qty = targetQuantity(item, settings);
+    const qty = listing.excluded_reason ? 0 : targetQuantity(item, settings);
     let price = targetPrice(item, rules, settings);
     if (price !== null && price !== item.ebay_price) {
       const problem = guardPriceChange(item.ebay_price, price, settings.priceGuardPct);
@@ -130,6 +143,10 @@ async function reconcileListingStatus(listingId: number) {
   if (!listing) return;
   const items = getItems(listingId);
   const total = items.reduce((s, i) => s + (i.ebay_qty ?? 0), 0);
+  if (listing.excluded_reason) {
+    if (listing.status !== 'paused') run(`UPDATE ebay_listings SET status = 'paused', updated_at = ? WHERE id = ?`, nowIso(), listingId);
+    return;
+  }
   if (total === 0) {
     if (listing.status !== 'out_of_stock') {
       run(`UPDATE ebay_listings SET status = 'out_of_stock', updated_at = ? WHERE id = ?`, nowIso(), listingId);
@@ -137,7 +154,7 @@ async function reconcileListingStatus(listingId: number) {
     }
     return;
   }
-  if (listing.status === 'out_of_stock') {
+  if (listing.status === 'out_of_stock' || listing.status === 'paused') {
     try {
       const offer = await ebay.getOffer(items[0].offer_id!);
       if (offer.status !== 'PUBLISHED' || offer.listing?.listingStatus === 'ENDED') {

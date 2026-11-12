@@ -19,6 +19,14 @@
 @layer base {
   html {
     @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-[#0b0b12] dark:text-zinc-100;
+    color-scheme: light;
+  }
+  /* Native dropdown lists follow the theme (fixes white text on a white list in dark mode) */
+  html.dark {
+    color-scheme: dark;
+  }
+  select option {
+    @apply bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100;
   }
   ::selection {
     @apply bg-brand-500/30;

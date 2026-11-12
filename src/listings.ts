@@ -13,7 +13,12 @@ import {
 } from './listing-builder.ts';
 import { logActivity } from './log.ts';
 import { bestOfferThresholds, effectiveBase, priceAtPct, type PricingRules } from './pricing.ts';
+import { excludedReasonFor, profileFor, profileRules } from './rules.ts';
 import { getBoxes, packageWeightAndSize, resolveBox, toOunces } from './shipping.ts';
+
+/** The complete Shopify name (product + variant), shown in the eBay description so nothing is lost when the title is shortened. */
+export const fullProductTitle = (productTitle: string, variantTitle: string | null) =>
+  variantTitle && variantTitle !== 'Default Title' ? `${productTitle} - ${variantTitle}` : productTitle;
 import * as shopify from './shopify.ts';
 
 export type Listing = {
@@ -38,6 +43,9 @@ export type Listing = {
   merchant_location_key: string | null;
   best_offer_enabled: number;
   box_id: string | null;
+  excluded_reason: string | null;
+  auto_publish: number;
+  full_title: string | null;
   locked_fields: string;
   ebay_listing_id: string | null;
   status: string;
@@ -214,7 +222,9 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
   const settings = getSettings();
   const product = await shopify.getProduct(opts.productId);
   if (!product) throw new Error('Shopify product not found');
-  const profile = getProfile(opts.profileId ?? null);
+  const ruleProduct = { id: product.id, title: product.title, tags: product.tags, productType: product.productType, vendor: product.vendor, collections: product.collections };
+  const profile = getProfile(opts.profileId ?? profileFor(ruleProduct, profileRules(settings)));
+  const excluded = excludedReasonFor(ruleProduct, settings);
   let variants = product.variants.nodes;
   if (opts.variantIds?.length) variants = variants.filter((v) => opts.variantIds!.includes(v.id));
   const taken = new Set(all<{ shopify_variant_id: string }>('SELECT shopify_variant_id FROM listing_items').map((r) => r.shopify_variant_id));
@@ -238,6 +248,7 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
       const gtin = gtinFields(first.barcode);
       if (gtin.aspect) aspects[gtin.aspect[0]] = [gtin.aspect[1]];
     }
+    const fullTitle = fullProductTitle(product.title, asGroup ? null : first.variant_title);
     const title = renderTitle(profile?.title_template || settings.titleTemplate, {
       brand: product.vendor,
       title: product.title,
@@ -247,6 +258,8 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
     });
     const description = renderDescription(profile?.description_template || settings.descriptionTemplate, {
       title: product.title,
+      fullTitle,
+      showFullTitle: settings.showFullTitleInDescription,
       description: product.descriptionHtml ?? '',
     });
     const varyingOptions = asGroup ? optionNames.filter((n) => new Set(groupVariants.map((v) => v.selectedOptions.find((o) => o.name === n)?.value)).size > 1) : [];
@@ -256,8 +269,9 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
     const listingId = tx(() => {
       const res = run(
         `INSERT INTO ebay_listings (kind, group_key, shopify_product_id, product_title, brand, profile_id, title, category_id, category_name,
-           aspects, description_html, image_urls, varies_by, fulfillment_policy_id, payment_policy_id, return_policy_id, merchant_location_key, best_offer_enabled, box_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           aspects, description_html, image_urls, varies_by, fulfillment_policy_id, payment_policy_id, return_policy_id, merchant_location_key, best_offer_enabled, box_id,
+           full_title, excluded_reason, auto_publish)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         asGroup ? 'group' : 'single',
         groupKey,
         product.id,
@@ -277,6 +291,9 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
         profile?.merchant_location_key || settings.merchantLocationKey || null,
         !asGroup && (profile?.best_offer_enabled ?? (settings.bestOfferDefault ? 1 : 0)) ? 1 : 0,
         profile?.box_id || null,
+        fullTitle,
+        excluded,
+        excluded ? 1 : 0,
       );
       const id = Number(res.lastInsertRowid);
       for (const v of groupVariants) {
@@ -306,7 +323,7 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
       return id;
     });
     ids.push(listingId);
-    logActivity('info', 'listing.draft', `Draft created: ${title}`, { listingId, variants: groupVariants.length });
+    logActivity('info', 'listing.draft', `Draft created: ${title}${excluded ? ` (waiting: ${excluded}; publishes automatically once that changes)` : ''}`, { listingId, variants: groupVariants.length });
   }
   return ids;
 }
@@ -381,8 +398,19 @@ export async function refreshFromShopify(id: number) {
       sku: items[0]?.sku,
     });
   }
+  const fullTitle = fullProductTitle(product.title, listing.kind === 'group' ? null : items[0]?.variant_title ?? null);
   if (!locked.has('description'))
-    patch.description_html = renderDescription(profile?.description_template || settings.descriptionTemplate, { title: product.title, description: product.descriptionHtml ?? '' });
+    patch.description_html = renderDescription(profile?.description_template || settings.descriptionTemplate, {
+      title: product.title,
+      fullTitle,
+      showFullTitle: settings.showFullTitleInDescription,
+      description: product.descriptionHtml ?? '',
+    });
+  const excluded = excludedReasonFor(
+    { id: product.id, title: product.title, tags: product.tags, productType: product.productType, vendor: product.vendor, collections: product.collections },
+    settings,
+  );
+  run('UPDATE ebay_listings SET full_title = ?, excluded_reason = ? WHERE id = ?', fullTitle, excluded, id);
   if (!locked.has('images')) {
     const imgs = (product.media?.nodes ?? []).map((m) => m.image?.url).filter(Boolean).slice(0, 24);
     if (imgs.length) patch.image_urls = imgs;
@@ -429,6 +457,8 @@ export async function validateListing(id: number): Promise<Issue[]> {
   const err = (field: string, message: string) => issues.push({ level: 'error', field, message });
   const warn = (field: string, message: string) => issues.push({ level: 'warning', field, message });
 
+  if (listing.excluded_reason)
+    warn('excluded', `Excluded by your rules (${listing.excluded_reason}). It will publish automatically once that no longer applies.`);
   if (!listing.title.trim()) err('title', 'Title is required');
   if (listing.title.length > 80) err('title', 'Title must be 80 characters or fewer');
   if (!listing.category_id) err('category_id', 'Choose an eBay category');
@@ -573,6 +603,10 @@ function groupPayload(listing: Listing, items: Item[]): ebay.ItemGroupPayload {
 export async function publishListing(id: number, opts: { skipValidation?: boolean } = {}) {
   const listing = getListing(id);
   if (!listing) throw new Error('Listing not found');
+  if (listing.excluded_reason) {
+    run('UPDATE ebay_listings SET auto_publish = 1 WHERE id = ?', id);
+    throw new Error(`Not published: ${listing.excluded_reason} (exclusion rule). It will publish automatically when that changes in Shopify.`);
+  }
   if (!opts.skipValidation) {
     const errors = (await validateListing(id)).filter((i) => i.level === 'error');
     if (errors.length) throw new Error(`Fix these first: ${errors.map((e) => e.message).join('; ')}`);
@@ -603,7 +637,7 @@ export async function publishListing(id: number, opts: { skipValidation?: boolea
     }
     const totalQty = items.reduce((s, i) => s + targetQuantity(i, settings), 0);
     run(
-      `UPDATE ebay_listings SET ebay_listing_id = ?, status = ?, last_error = NULL, published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?`,
+      `UPDATE ebay_listings SET ebay_listing_id = ?, status = ?, last_error = NULL, auto_publish = 0, published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?`,
       listingId,
       totalQty > 0 ? 'published' : 'out_of_stock',
       nowIso(),

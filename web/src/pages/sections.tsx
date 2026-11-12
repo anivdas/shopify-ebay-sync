@@ -700,7 +700,25 @@ export function SyncSection() {
             </>
           }
         >
-          <input className="input" placeholder="https://ntfy.sh/your-topic" value={draft.alertWebhookUrl ?? ''} onChange={(e) => set('alertWebhookUrl', e.target.value)} />
+          <div className="flex gap-2">
+            <input className="input" placeholder="https://ntfy.sh/your-topic" value={draft.alertWebhookUrl ?? ''} onChange={(e) => set('alertWebhookUrl', e.target.value)} />
+            <Button
+              loading={busy === 'testalert'}
+              disabled={!draft.alertWebhookUrl}
+              onClick={() =>
+                run(
+                  'testalert',
+                  async () => {
+                    if (dirty) await save(draft);
+                    await post('/api/alerts/test');
+                  },
+                  'Test alert sent. Check your phone.',
+                )
+              }
+            >
+              Send test alert
+            </Button>
+          </div>
         </Field>
       </div>
       <div className="space-y-3">
@@ -741,20 +759,189 @@ export function SyncSection() {
   );
 }
 
+// ======================= Rules (exclusions, exceptions, auto profiles) =======================
+
+const RULE_FIELDS: [string, string][] = [
+  ['title', 'Title'],
+  ['tag', 'Tag'],
+  ['type', 'Product type'],
+  ['vendor', 'Vendor (brand)'],
+  ['collection', 'Collection'],
+];
+
+type RuleRow = { field: string; value: string; profileId?: number };
+
+function RuleRows({ rows, onChange, profiles }: { rows: RuleRow[]; onChange: (r: RuleRow[]) => void; profiles?: { id: number; name: string }[] }) {
+  const upd = (i: number, k: keyof RuleRow, v: unknown) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
+  return (
+    <div className="space-y-2">
+      {rows.map((r, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2">
+          <select className="input w-40" value={r.field} onChange={(e) => upd(i, 'field', e.target.value)}>
+            {RULE_FIELDS.map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <span className="text-sm text-zinc-500">contains</span>
+          <input className="input w-48" placeholder="e.g. preorder" value={r.value} onChange={(e) => upd(i, 'value', e.target.value)} />
+          {profiles && (
+            <>
+              <span className="text-sm text-zinc-500">use profile</span>
+              <select className="input w-48" value={r.profileId ?? ''} onChange={(e) => upd(i, 'profileId', Number(e.target.value))}>
+                <option value="">Select...</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          <button className="text-xs text-rose-500 hover:underline" onClick={() => onChange(rows.filter((_, j) => j !== i))}>
+            Remove
+          </button>
+        </div>
+      ))}
+      <Button onClick={() => onChange([...rows, { field: profiles ? 'type' : 'title', value: '' }])}>+ Add rule</Button>
+    </div>
+  );
+}
+
+export function RulesSection() {
+  const { settings, save } = useSettings();
+  const { busy, run } = useAction();
+  const profiles = useApi('/api/profiles');
+  const overrides = useApi('/api/rules/overrides');
+  const [exclude, setExclude] = useState<RuleRow[]>([]);
+  const [profRules, setProfRules] = useState<RuleRow[]>([]);
+  const { draft, set } = useDraft(settings, ['allowTag', 'blockTag', 'autoListWhenEligible', 'autoPublish']);
+  useEffect(() => {
+    if (!settings) return;
+    setExclude(JSON.parse(settings.excludeRules || '[]'));
+    setProfRules(JSON.parse(settings.profileRules || '[]'));
+  }, [settings]);
+  if (!settings) return null;
+  const list = (overrides.data?.overrides ?? []) as { product_id: string; mode: string; title: string | null }[];
+
+  return (
+    <div className="space-y-8">
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Don't list products that match</h3>
+        <p className="text-sm text-zinc-500">
+          Matching is "contains" and ignores case, spaces and dashes. Matching products can't be published. Live listings that start matching are paused on eBay (quantity 0, listing kept) and resume automatically when the rule no longer matches.
+        </p>
+        <RuleRows rows={exclude} onChange={setExclude} />
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Exceptions</h3>
+        <p className="text-sm text-zinc-500">
+          Set exceptions per product on the <b>Shopify products</b> page ("Allow anyway" / "Never list"), or with Shopify tags, which makes bulk changes easy in Shopify's bulk editor. Priority: never list → allow → rules above.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Tag that always allows a product" hint="Lists it even if a rule above matches (e.g. a preorder you want on eBay)">
+            <input className="input font-mono" value={draft.allowTag ?? ''} onChange={(e) => set('allowTag', e.target.value)} />
+          </Field>
+          <Field label="Tag that never lists a product" hint="Keeps it off eBay no matter what">
+            <input className="input font-mono" value={draft.blockTag ?? ''} onChange={(e) => set('blockTag', e.target.value)} />
+          </Field>
+        </div>
+        {list.length > 0 && (
+          <div className="rounded-xl border border-zinc-200 dark:border-white/10">
+            <div className="border-b border-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-500 uppercase dark:border-white/[0.06]">Exceptions set in the app</div>
+            <ul className="divide-y divide-zinc-100 dark:divide-white/[0.05]">
+              {list.map((o) => (
+                <li key={o.product_id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <Badge color={o.mode === 'allow' ? 'green' : 'red'}>{o.mode === 'allow' ? 'Allow anyway' : 'Never list'}</Badge>
+                  <span className="min-w-0 flex-1 truncate">{o.title ?? o.product_id}</span>
+                  <button className="text-xs text-zinc-500 hover:underline" onClick={() => run('ov', () => post(`/api/products/${encodeURIComponent(o.product_id)}/override`, { mode: null }).then(() => overrides.reload()), 'Exception removed')}>
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">When a product stops matching</h3>
+        <Toggle checked={!!draft.autoListWhenEligible} onChange={(v) => set('autoListWhenEligible', v)} label="Automatically list it on eBay" description='E.g. when "preorder" is removed from the title. Only applies to products the app saw while they were excluded, so your whole catalog is never listed by surprise. Checked every 30 minutes.' />
+        <Toggle checked={!!draft.autoPublish} onChange={(v) => set('autoPublish', v)} label="Publish right away (otherwise create a draft for review)" description="Listings that fail eBay's checks (e.g. a missing item specific) are kept as drafts, and you get an alert." />
+      </div>
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Pick a profile (category, policies, box) automatically</h3>
+        <p className="text-sm text-zinc-500">The first matching rule decides the profile for new and auto-created listings, unless you pick a profile yourself.</p>
+        <RuleRows rows={profRules} onChange={setProfRules} profiles={profiles.data?.profiles ?? []} />
+        {!(profiles.data?.profiles ?? []).length && <p className="text-xs text-amber-600">Create a profile first under Listing profiles.</p>}
+      </div>
+
+      <Button
+        variant="primary"
+        loading={busy === 'save'}
+        onClick={() =>
+          run(
+            'save',
+            () =>
+              save({
+                ...draft,
+                excludeRules: JSON.stringify(exclude.filter((r) => r.value.trim())),
+                profileRules: JSON.stringify(profRules.filter((r) => r.value.trim() && r.profileId)),
+              }),
+            'Rules saved. They apply at the next sync.',
+          )
+        }
+      >
+        Save rules
+      </Button>
+    </div>
+  );
+}
+
 // ======================= Listing templates =======================
 
 export function TemplatesSection() {
   const { settings, save } = useSettings();
   const { busy, run } = useAction();
-  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate']);
+  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription']);
+  const [sample, setSample] = useState('The Lord of the Rings: The Return of the King 4K Ultra HD Blu-ray Disc + Digital Code Limited Edition Steelbook Collection');
+  const [preview, setPreview] = useState<{ title: string; shortened: boolean; removed: string[] } | null>(null);
+  useEffect(() => {
+    const t = setTimeout(() => post('/api/tools/title-preview', { title: sample }).then(setPreview).catch(() => undefined), 300);
+    return () => clearTimeout(t);
+  }, [sample]);
   if (!settings) return null;
+  const fullLine = draft.showFullTitleInDescription && !/\{\{\s*full_title\s*\}\}/.test(draft.descriptionTemplate ?? '') ? `<p style="font-size:15px"><b>This listing is for:</b> ${sample}</p>` : '';
   return (
     <div className="space-y-5">
-      <Field label="Title template" hint="Placeholders: {brand} {title} {options} {type} {sku}. Titles are trimmed to eBay's 80-character limit on a word boundary.">
+      <Field label="Title template" hint="Placeholders: {brand} {title} {options} {type} {sku}.">
         <input className="input font-mono" value={draft.titleTemplate ?? ''} onChange={(e) => set('titleTemplate', e.target.value)} />
       </Field>
+      <div className="rounded-xl bg-zinc-50 p-4 dark:bg-white/[0.03]">
+        <span className="label">How long titles are shortened for eBay (80 characters max)</span>
+        <input className="input text-sm" value={sample} onChange={(e) => setSample(e.target.value)} />
+        {preview && (
+          <div className="mt-3 space-y-1 text-sm">
+            <div>
+              <span className="text-zinc-500">eBay title: </span>
+              <b>{preview.title}</b> <span className="text-xs text-zinc-500">({preview.title.length}/80)</span>
+            </div>
+            {preview.removed.length > 0 && <div className="text-xs text-amber-600">Had to drop: {preview.removed.join(' ')}</div>}
+            <p className="text-xs text-zinc-500">The app tidies spacing and separators, removes repeated words, uses common abbreviations (4K UHD, Ltd Ed, Coll, &amp;, w/), drops filler words, and only cuts words as a last resort. The full name always appears in the description.</p>
+          </div>
+        )}
+      </div>
+      <Toggle
+        checked={!!draft.showFullTitleInDescription}
+        onChange={(v) => set('showFullTitleInDescription', v)}
+        label='Start the description with "This listing is for: <full Shopify product name>"'
+        description="Keeps the complete product name on eBay even when the title had to be shortened. Or place {{full_title}} anywhere in your template yourself."
+      />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Field label="Description template (HTML)" hint="Placeholders: {{title}} {{description}}. Scripts and iframes are removed automatically because eBay blocks active content.">
+        <Field label="Description template (HTML)" hint="Placeholders: {{full_title}} {{title}} {{description}}. Scripts and iframes are removed automatically because eBay blocks active content.">
           <textarea rows={16} className="input font-mono text-xs" value={draft.descriptionTemplate ?? ''} onChange={(e) => set('descriptionTemplate', e.target.value)} />
         </Field>
         <div>
@@ -763,7 +950,13 @@ export function TemplatesSection() {
             title="preview"
             sandbox=""
             className="h-[340px] w-full rounded-xl border border-zinc-200 bg-white dark:border-white/10"
-            srcDoc={(draft.descriptionTemplate ?? '').replace(/\{\{\s*title\s*\}\}/g, 'Sample Product Title').replace(/\{\{\s*description\s*\}\}/g, '<p>Your Shopify product description appears here.</p>')}
+            srcDoc={
+              fullLine +
+              (draft.descriptionTemplate ?? '')
+                .replace(/\{\{\s*full_title\s*\}\}/g, sample)
+                .replace(/\{\{\s*title\s*\}\}/g, sample)
+                .replace(/\{\{\s*description\s*\}\}/g, '<p>Your Shopify product description appears here.</p>')
+            }
           />
         </div>
       </div>

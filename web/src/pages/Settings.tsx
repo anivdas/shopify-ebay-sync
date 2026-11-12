@@ -1,9 +1,9 @@
 import { Download } from 'lucide-react';
 import { useState } from 'react';
 import { Card, PageHeader, Tabs } from '../ui.tsx';
-import { EbayConnectSection, EbayKeysSection, InventorySection, PoliciesSection, PricingSection, SecuritySection, ShippingSection, ShopifySection, SyncSection, TemplatesSection } from './sections.tsx';
+import { EbayConnectSection, EbayKeysSection, InventorySection, PoliciesSection, PricingSection, RulesSection, SecuritySection, ShippingSection, ShopifySection, SyncSection, TemplatesSection } from './sections.tsx';
 
-type Tab = 'connections' | 'ebay' | 'shipping' | 'pricing' | 'inventory' | 'templates' | 'sync' | 'security';
+type Tab = 'connections' | 'ebay' | 'shipping' | 'pricing' | 'rules' | 'inventory' | 'templates' | 'sync' | 'security';
 
 export function SettingsPage({ onChange }: { onChange: () => void }) {
   const initial = (new URLSearchParams(location.search).get('tab') as Tab) || 'connections';
@@ -31,6 +31,7 @@ export function SettingsPage({ onChange }: { onChange: () => void }) {
             { value: 'ebay', label: 'eBay defaults' },
             { value: 'shipping', label: 'Shipping' },
             { value: 'pricing', label: 'Pricing' },
+            { value: 'rules', label: 'Rules' },
             { value: 'inventory', label: 'Inventory' },
             { value: 'templates', label: 'Templates' },
             { value: 'sync', label: 'Sync & alerts' },
@@ -65,6 +66,11 @@ export function SettingsPage({ onChange }: { onChange: () => void }) {
         {tab === 'pricing' && (
           <Card title="Pricing rules">
             <PricingSection onSaved={onChange} />
+          </Card>
+        )}
+        {tab === 'rules' && (
+          <Card title="Rules" description="Keep products like preorders off eBay, set exceptions, and pick profiles automatically.">
+            <RulesSection />
           </Card>
         )}
         {tab === 'inventory' && (

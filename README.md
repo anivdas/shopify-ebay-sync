@@ -38,6 +38,22 @@ It runs on a NAS (Synology, Unraid, QNAP), a Raspberry Pi, a home server or any 
 - Price history charts, plus alerts when competitors drop below your floor.
 - Choose whether Shopify sale prices also apply on eBay.
 
+**Rules (e.g. keep preorders off eBay)**
+- **Exclusion rules:** don't list products whose title, tags, product type, vendor or collection contains a word, e.g. "preorder", "pre-order" or "pre order" (the default).
+  - Live listings that start matching are paused (quantity 0, listing kept).
+  - They resume automatically when the rule no longer matches.
+- **Auto-list when eligible:** products seen while excluded are listed automatically once they stop matching, e.g. when "preorder" is removed from the title. If a listing needs review, it's kept as a draft and you get an alert.
+- **Exceptions:** set "Allow anyway" or "Never list" per product in the app, or use the Shopify tags `ebay-allow` and `ebay-block`, which work well with Shopify's bulk editor.
+- **Profile rules:** e.g. product type contains "4K" → profile *4K Blu-ray*, which picks the category, policies and box automatically.
+
+**Smart titles**
+- Long Shopify names are shortened to eBay's 80 characters in steps:
+  1. tidy separators and remove repeated words;
+  2. use searchable abbreviations (4K UHD, Ltd Ed, Coll, &, w/);
+  3. drop filler words;
+  4. cut words only as a last resort. The editor shows anything that was dropped.
+- The **full Shopify name** is shown at the top of the eBay description ("This listing is for: …").
+
 **Catalog health (fixes your Shopify data for eBay)**
 - Scans every variant for missing or duplicate SKUs, SKUs eBay rejects, missing or invalid UPC/EAN barcodes (the check digit is verified), untracked stock, missing costs, brands and photos.
 - **SKU generator:** readable, unique SKUs like `SONY-WH1000XM5-BLK` built from brand, model number and options. You preview and edit every SKU before it's saved, and the last change can be undone with one click.

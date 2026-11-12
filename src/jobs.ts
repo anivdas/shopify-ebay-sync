@@ -1,3 +1,4 @@
+import { runAutoList } from './autolist.ts';
 import { ebayConfigured, shopifyConfigured } from './credentials.ts';
 import { all, getSettings, nowIso, run, type Settings } from './db.ts';
 import { ebayConnected } from './ebay.ts';
@@ -13,6 +14,7 @@ const HOUR = 60 * MIN;
 export const JOBS: Record<string, Job> = {
   orders: { label: 'eBay sales -> Shopify stock', description: 'Reduces Shopify stock when items sell on eBay', interval: (s) => s.ordersIntervalMin * MIN, fn: processEbayOrders, needsShopify: true },
   sync: { label: 'Shopify -> eBay price & stock', description: 'Pushes Shopify price/quantity changes to eBay', interval: (s) => s.syncIntervalMin * MIN, fn: () => syncShopifyToEbay(), needsShopify: true },
+  autolist: { label: 'Rules & auto-listing', description: 'Lists products once they stop matching an exclusion rule (e.g. preorders)', interval: () => 30 * MIN, fn: runAutoList, needsShopify: true },
   research: { label: 'Market price research', description: 'Checks active & sold brand-new comps on eBay', interval: (s) => s.researchIntervalHours * HOUR, fn: researchAll, needsShopify: false },
   verify: { label: 'Listing health check', description: 'Compares live eBay listings with expected values', interval: (s) => s.verifyIntervalHours * HOUR, fn: verifyListings, needsShopify: true },
   finances: { label: 'eBay fees & payouts', description: 'Imports real eBay fees for profit reports', interval: (s) => s.financeIntervalHours * HOUR, fn: syncFinances, needsShopify: false },

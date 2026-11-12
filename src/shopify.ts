@@ -95,8 +95,12 @@ export type ShopifyProduct = {
   featuredMedia: { preview: { image: { url: string; width?: number; height?: number } | null } | null } | null;
   media?: { nodes: { image?: { url: string; width?: number; height?: number } }[] };
   options?: { name: string; values: string[] }[];
+  collections?: string[];
   variants: { nodes: ShopifyVariant[] };
 };
+
+/** Collections are only used for rules; the query asks for titles and we flatten them to string[]. */
+const flattenCollections = (p: any) => (p?.collections?.nodes ? { ...p, collections: p.collections.nodes.map((c: { title: string }) => c.title) } : p);
 
 // Uses the current (non-deprecated) `barcodes` and `media` fields; normalized into `barcode` / `image` below.
 const VARIANT_FIELDS = `
@@ -124,7 +128,7 @@ const normalizeVariant = (v: RawVariant): ShopifyVariant => {
   return { ...rest, barcode: pickBarcode(barcodes?.nodes), image: url ? { url } : null };
 };
 
-const normalizeProduct = (p: any): ShopifyProduct => ({ ...p, variants: { nodes: (p.variants?.nodes ?? []).map(normalizeVariant) } });
+const normalizeProduct = (p: any): ShopifyProduct => ({ ...flattenCollections(p), variants: { nodes: (p.variants?.nodes ?? []).map(normalizeVariant) } });
 
 export type ProductSummary = {
   id: string;
@@ -137,25 +141,49 @@ export type ProductSummary = {
   variantsCount: { count: number };
   priceRangeV2: { minVariantPrice: { amount: string }; maxVariantPrice: { amount: string } };
   featuredMedia: { preview: { image: { url: string } | null } | null } | null;
+  tags: string[];
+  collections: string[];
 };
 
 /** Lightweight product list (variants are loaded per product to stay under Shopify's query cost limit). */
 export async function listProducts(opts: { query?: string; after?: string | null; first?: number }) {
-  const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ProductSummary[] } }>(
+  const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: any[] } }>(
     `query ($first: Int!, $after: String, $query: String) {
       products(first: $first, after: $after, query: $query, sortKey: TITLE) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id title vendor productType status totalInventory hasOnlyDefaultVariant
+          id title vendor productType status totalInventory hasOnlyDefaultVariant tags
           variantsCount { count }
           priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
           featuredMedia { preview { image { url } } }
+          collections(first: 5) { nodes { title } }
         }
       }
     }`,
-    { first: Math.min(opts.first ?? 50, 100), after: opts.after ?? null, query: opts.query || null },
+    { first: Math.min(opts.first ?? 50, 50), after: opts.after ?? null, query: opts.query || null },
   );
-  return data.products;
+  return { pageInfo: data.products.pageInfo, nodes: data.products.nodes.map(flattenCollections) as ProductSummary[] };
+}
+
+export type RuleScanProduct = { id: string; title: string; vendor: string; productType: string; status: string; tags: string[]; collections: string[] };
+
+/** Every product with just the fields rules need (for auto-listing when a product stops being excluded). */
+export async function* allProductsForRules(): AsyncGenerator<RuleScanProduct[]> {
+  let after: string | null = null;
+  for (;;) {
+    const data: { products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: any[] } } = await gql(
+      `query ($after: String) {
+        products(first: 50, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes { id title vendor productType status tags collections(first: 5) { nodes { title } } }
+        }
+      }`,
+      { after },
+    );
+    yield data.products.nodes.map(flattenCollections);
+    if (!data.products.pageInfo.hasNextPage) return;
+    after = data.products.pageInfo.endCursor;
+  }
 }
 
 export type CatalogVariant = {
@@ -201,6 +229,7 @@ export async function getProduct(id: string): Promise<ShopifyProduct | null> {
         id title handle vendor productType status tags descriptionHtml totalInventory
         featuredMedia { preview { image { url width height } } }
         options { name values }
+        collections(first: 10) { nodes { title } }
         media(first: 24) { nodes { ... on MediaImage { image { url width height } } } }
         variants(first: 100) { nodes { ${VARIANT_FIELDS} } }
       }
@@ -241,25 +270,25 @@ export type VariantState = {
   compareAtPrice: string | null;
   inventoryQuantity: number | null;
   inventoryItem: InventoryItemInfo;
-  product: { id: string; status: string };
+  product: { id: string; status: string; title?: string; vendor?: string; productType?: string; tags?: string[]; collections?: string[] };
 };
 
 export async function getVariantStates(ids: string[]): Promise<Map<string, VariantState>> {
   const out = new Map<string, VariantState>();
-  for (let i = 0; i < ids.length; i += 100) {
-    const data = await gql<{ nodes: (VariantState | null)[] }>(
+  for (let i = 0; i < ids.length; i += 50) {
+    const data = await gql<{ nodes: (any | null)[] }>(
       `query ($ids: [ID!]!) {
         nodes(ids: $ids) {
           ... on ProductVariant {
             id price compareAtPrice inventoryQuantity
             inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
-            product { id status }
+            product { id status title vendor productType tags collections(first: 5) { nodes { title } } }
           }
         }
       }`,
-      { ids: ids.slice(i, i + 100) },
+      { ids: ids.slice(i, i + 50) },
     );
-    for (const n of data.nodes) if (n?.id) out.set(n.id, n);
+    for (const n of data.nodes) if (n?.id) out.set(n.id, { ...n, product: flattenCollections(n.product) });
   }
   return out;
 }

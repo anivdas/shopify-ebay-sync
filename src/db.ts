@@ -194,6 +194,22 @@ addColumn('profiles', 'box_id', 'TEXT');
 addColumn('ebay_listings', 'box_id', 'TEXT');
 addColumn('listing_items', 'weight_value', 'REAL');
 addColumn('listing_items', 'weight_unit', 'TEXT');
+addColumn('ebay_listings', 'excluded_reason', 'TEXT');
+addColumn('ebay_listings', 'auto_publish', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('ebay_listings', 'full_title', 'TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS product_overrides (
+  product_id TEXT PRIMARY KEY,
+  mode TEXT NOT NULL,
+  title TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS watched_products (
+  product_id TEXT PRIMARY KEY,
+  title TEXT,
+  reason TEXT,
+  first_seen TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  last_seen TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+)`);
 
 export type Row = Record<string, any>;
 
@@ -273,6 +289,19 @@ export const defaultSettings = {
   returnPolicyId: '',
   merchantLocationKey: '',
   titleTemplate: '{brand} {title} {options}',
+  showFullTitleInDescription: true,
+  // Rules. JSON arrays of { field: 'title'|'tag'|'type'|'vendor'|'collection', value: string } (case-insensitive "contains")
+  excludeRules: JSON.stringify([
+    { field: 'title', value: 'preorder' },
+    { field: 'title', value: 'pre-order' },
+    { field: 'title', value: 'pre order' },
+  ]),
+  allowTag: 'ebay-allow',
+  blockTag: 'ebay-block',
+  autoListWhenEligible: true,
+  autoPublish: true,
+  // [{ field, value, profileId }] - first match wins
+  profileRules: '[]',
   descriptionTemplate: `<div style="font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:0 auto;color:#222;line-height:1.5">
   <h2 style="margin:0 0 12px">{{title}}</h2>
   <p style="background:#eef7ee;padding:8px 12px;border-radius:6px"><b>Condition:</b> Brand new.</p>

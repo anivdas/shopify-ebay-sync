@@ -125,6 +125,13 @@ export function ListingEditor({ id }: { id: number }) {
           </>
         }
       />
+      {l.excluded_reason && (
+        <div className="mb-4">
+          <Callout kind="warn" title={l.status === 'paused' ? 'Paused on eBay by your rules' : 'Waiting: excluded by your rules'}>
+            {l.excluded_reason}. {l.status === 'paused' ? 'Quantity is 0 on eBay until this changes.' : 'It publishes automatically once this no longer applies.'} To make an exception, use the product's exception menu on the Shopify products page, or add the allow tag in Shopify.
+          </Callout>
+        </div>
+      )}
       {l.last_error && (
         <div className="mb-4">
           <Callout kind="error" title="eBay reported a problem">
@@ -140,6 +147,11 @@ export function ListingEditor({ id }: { id: number }) {
               <Field label={<span className="flex items-center gap-1">eBay title <LockBtn f="title" /></span>} hint={<span className={cx(draft.title.length > 80 && 'text-rose-500')}>{draft.title.length}/80 characters. Lead with brand, model and key specs; buyers search by these.</span>}>
                 <input className="input text-base font-medium" maxLength={80} value={draft.title} onChange={(e) => set('title', e.target.value)} />
               </Field>
+              {l.full_title && l.full_title !== draft.title && (
+                <p className="-mt-2 text-xs text-zinc-500">
+                  Full Shopify name (shown at the top of the eBay description): <span className="text-zinc-700 dark:text-zinc-300">{l.full_title}</span>
+                </p>
+              )}
               <CategoryPicker value={{ id: draft.category_id, name: draft.category_name }} defaultQuery={l.product_title} onChange={(c) => setDraft((d: any) => ({ ...d, category_id: c.id, category_name: c.name }))} />
             </div>
           </Card>

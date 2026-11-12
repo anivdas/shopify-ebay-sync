@@ -150,14 +150,27 @@ export function Products() {
                       <td className="table-cell tabular-nums">{p.minPrice === p.maxPrice ? money(p.minPrice, currency) : `${money(p.minPrice, currency)} – ${money(p.maxPrice, currency)}`}</td>
                       <td className="table-cell tabular-nums">{p.totalInventory ?? '—'}</td>
                       <td className="table-cell">
-                        {p.linked ? (
-                          <div className="flex items-center gap-1.5">
-                            <StatusBadge status={p.linked.status} />
-                            {!fullyLinked(p) && <span className="text-xs text-zinc-500">{p.variantsCount - p.linked.linked_variants} unlisted</span>}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-zinc-400">Not listed</span>
-                        )}
+                        <div className="space-y-1">
+                          {p.linked ? (
+                            <div className="flex items-center gap-1.5">
+                              <StatusBadge status={p.linked.status} />
+                              {!fullyLinked(p) && <span className="text-xs text-zinc-500">{p.variantsCount - p.linked.linked_variants} unlisted</span>}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-zinc-400">Not listed</span>
+                          )}
+                          {p.excluded && (
+                            <Badge color="amber" title="Excluded by your rules. It lists automatically once this no longer applies.">
+                              Excluded: {p.excluded}
+                            </Badge>
+                          )}
+                          {!p.excluded && p.exception && (
+                            <Badge color="green" title={p.exception}>
+                              Exception: allowed
+                            </Badge>
+                          )}
+                          <ExceptionPicker product={p} onChanged={list.reload} />
+                        </div>
                       </td>
                       <td className="table-cell text-right">
                         <div className="flex justify-end gap-1">
@@ -235,6 +248,30 @@ export function Products() {
         {market && <MarketCheck productId={market.productId} currency={currency} />}
       </Modal>
     </div>
+  );
+}
+
+/** Per-product exception: follow the rules, always allow (e.g. a preorder you do want on eBay), or never list. */
+function ExceptionPicker({ product, onChanged }: { product: any; onChanged: () => void }) {
+  const { busy, run } = useAction();
+  return (
+    <select
+      className="input w-auto py-0.5 pr-7 text-[11px] text-zinc-500"
+      title="Exception for this product"
+      disabled={!!busy}
+      value={product.override ?? ''}
+      onChange={(e) =>
+        run(
+          'ov',
+          () => post(`/api/products/${encodeURIComponent(product.id)}/override`, { mode: e.target.value || null }).then(onChanged),
+          e.target.value === 'allow' ? 'Allowed on eBay' : e.target.value === 'block' ? 'Will never be listed' : 'Following the rules again',
+        )
+      }
+    >
+      <option value="">Follow rules</option>
+      <option value="allow">Allow anyway</option>
+      <option value="block">Never list</option>
+    </select>
   );
 }
 
@@ -323,7 +360,9 @@ function BulkModal({ open, onClose, selected, profiles, onDone }: { open: boolea
           </div>
         </div>
         <Toggle checked={publish} onChange={setPublish} label="Publish right away" description="Otherwise drafts are created for you to review first (recommended for your first listings)." />
-        <Callout kind="info">Prices are set automatically within your markup range after a quick eBay market check.</Callout>
+        <Callout kind="info">
+          Prices are set automatically within your markup range after a quick eBay market check. Products excluded by your rules (e.g. preorders) become <b>waiting drafts</b> that publish automatically once the rule no longer matches.
+        </Callout>
       </div>
     </Modal>
   );

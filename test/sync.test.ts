@@ -20,6 +20,7 @@ type Call = { url: string; body: any };
 let calls: Call[] = [];
 let shopifyAvailable = 5;
 let variantPrice = '100.00';
+let productTitle = 'Test item';
 let orders: any[] = [];
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
@@ -39,7 +40,7 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     if (q.includes('nodes(ids'))
       return json({
         data: {
-          nodes: [{ id: 'gid://shopify/ProductVariant/11', price: variantPrice, compareAtPrice: null, inventoryQuantity: shopifyAvailable, inventoryItem: { id: 'gid://shopify/InventoryItem/22', tracked: true, unitCost: { amount: '60.00' } }, product: { id: 'gid://shopify/Product/33', status: 'ACTIVE' } }],
+          nodes: [{ id: 'gid://shopify/ProductVariant/11', price: variantPrice, compareAtPrice: null, inventoryQuantity: shopifyAvailable, inventoryItem: { id: 'gid://shopify/InventoryItem/22', tracked: true, unitCost: { amount: '60.00' } }, product: { id: 'gid://shopify/Product/33', status: 'ACTIVE', title: productTitle, tags: [], productType: '', vendor: '', collections: { nodes: [] } } }],
         },
       });
   }
@@ -69,6 +70,7 @@ beforeEach(() => {
   updateSettings({ dryRun: false, quantityBuffer: 0, priceGuardPct: 30, restockOnCancel: true });
   shopifyAvailable = 5;
   variantPrice = '100.00';
+  productTitle = 'Test item';
   const res = run(
     `INSERT INTO ebay_listings (kind, shopify_product_id, product_title, title, category_id, status, ebay_listing_id, fulfillment_policy_id, payment_policy_id, return_policy_id, merchant_location_key)
      VALUES ('single', 'gid://shopify/Product/33', 'Test item', 'Test item', '123', 'published', 'L1', 'f', 'p', 'r', 'loc')`,
@@ -134,6 +136,25 @@ test('price follows Shopify within the markup range', async () => {
   const push = calls.find((c) => c.url.includes('bulk_update_price_quantity'))!;
   const price = Number(push.body.requests[0].offers[0].price.value);
   assert.ok(price >= 126.5 && price <= 128.7, `price ${price} within +15..17% of 110`);
+});
+
+test('a listing whose title gains "Pre-Order" is paused at 0 and resumes when it is removed', async () => {
+  productTitle = 'Test item [Pre-Order]';
+  await syncShopifyToEbay();
+  let push = calls.find((c) => c.url.includes('bulk_update_price_quantity'))!;
+  assert.equal(push.body.requests[0].shipToLocationAvailability.quantity, 0);
+  let l = get<{ status: string; excluded_reason: string }>(`SELECT status, excluded_reason FROM ebay_listings`)!;
+  assert.equal(l.status, 'paused');
+  assert.match(l.excluded_reason, /pre-order/i);
+
+  calls = [];
+  productTitle = 'Test item';
+  await syncShopifyToEbay();
+  push = calls.find((c) => c.url.includes('bulk_update_price_quantity'))!;
+  assert.equal(push.body.requests[0].shipToLocationAvailability.quantity, 5);
+  l = get<{ status: string; excluded_reason: string }>(`SELECT status, excluded_reason FROM ebay_listings`)!;
+  assert.equal(l.status, 'published');
+  assert.equal(l.excluded_reason, null);
 });
 
 test('dry-run mode changes nothing', async () => {

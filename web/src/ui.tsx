@@ -135,6 +135,7 @@ export const STATUS: Record<string, { label: string; color: keyof typeof BADGE }
   draft: { label: 'Draft', color: 'gray' },
   published: { label: 'Live', color: 'green' },
   out_of_stock: { label: 'Out of stock', color: 'amber' },
+  paused: { label: 'Paused (rule)', color: 'amber' },
   ended: { label: 'Ended', color: 'gray' },
   error: { label: 'Error', color: 'red' },
 };
