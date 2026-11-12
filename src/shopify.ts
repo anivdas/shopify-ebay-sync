@@ -67,6 +67,7 @@ export type InventoryItemInfo = {
   tracked: boolean;
   unitCost: { amount: string } | null;
   measurement?: { weight: { unit: string; value: number } | null } | null;
+  countryCodeOfOrigin?: string | null;
 };
 
 export type ShopifyVariant = {
@@ -108,7 +109,7 @@ const VARIANT_FIELDS = `
   barcodes(first: 2) { nodes { value type } }
   selectedOptions { name value }
   media(first: 1) { nodes { preview { image { url } } } }
-  inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
+  inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } countryCodeOfOrigin }
 `;
 
 type RawVariant = Omit<ShopifyVariant, 'barcode' | 'image'> & {
@@ -209,7 +210,7 @@ export async function* allVariants(): AsyncGenerator<CatalogVariant[]> {
             id title sku inventoryQuantity
             selectedOptions { name value }
             barcodes(first: 3) { nodes { value type } }
-            inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
+            inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } countryCodeOfOrigin }
             product { id title vendor status featuredMedia { preview { image { url width height } } } }
           }
         }
@@ -281,7 +282,7 @@ export async function getVariantStates(ids: string[]): Promise<Map<string, Varia
         nodes(ids: $ids) {
           ... on ProductVariant {
             id price compareAtPrice inventoryQuantity
-            inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } }
+            inventoryItem { id tracked unitCost { amount } measurement { weight { unit value } } countryCodeOfOrigin }
             product { id status title vendor productType tags collections(first: 5) { nodes { title } } }
           }
         }

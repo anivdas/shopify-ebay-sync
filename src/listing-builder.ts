@@ -145,7 +145,39 @@ type AspectDef = { name: string; values: string[]; freeText: boolean };
  * Fills item specifics eBay requires/recommends for media from the product title and description,
  * using eBay's allowed values so they're accepted. Only returns aspects that are currently empty.
  */
-export function inferAspects(input: { title: string; description?: string; brand?: string | null }, defs: AspectDef[], existing: Record<string, string[]> = {}): Record<string, string[]> {
+/** Other names eBay uses for countries whose English display name differs. */
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  KR: ['South Korea', 'Korea, Republic of', 'Korea'],
+  GB: ['United Kingdom', 'UK', 'Great Britain'],
+  US: ['United States', 'USA'],
+  TW: ['Taiwan'],
+  CN: ['China'],
+  HK: ['Hong Kong'],
+  CZ: ['Czech Republic', 'Czechia'],
+  RU: ['Russian Federation', 'Russia'],
+};
+
+/** Maps a Shopify ISO country code (e.g. "KR") to the eBay value, preferring the category's allowed values. */
+export function countryValue(code: string | null | undefined, allowed: string[] = []): string | null {
+  const c = (code ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return null;
+  let display: string | undefined;
+  try {
+    display = new Intl.DisplayNames(['en'], { type: 'region' }).of(c);
+  } catch {
+    display = undefined;
+  }
+  const names = [...new Set([...(COUNTRY_ALIASES[c] ?? []), display].filter((x): x is string => !!x && x !== c))];
+  if (!allowed.length) return names[0] ?? null;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+  for (const n of names) {
+    const hit = allowed.find((v) => norm(v) === norm(n));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export function inferAspects(input: { title: string; description?: string; brand?: string | null; countryOfOrigin?: string | null }, defs: AspectDef[], existing: Record<string, string[]> = {}): Record<string, string[]> {
   const text = `${input.title} ${input.description ?? ''}`;
   const pick = (d: AspectDef, re: RegExp, label: string) => d.values.filter((v) => re.test(v)).sort((a, b) => a.length - b.length)[0] ?? (d.freeText ? label : null);
   const out: Record<string, string[]> = {};
@@ -156,6 +188,7 @@ export function inferAspects(input: { title: string; description?: string; brand
     else if (/movie.*title/i.test(d.name)) v = inferMovieTitle(input.title, input.brand);
     else if (/^case type$/i.test(d.name) && /steel\s?book/i.test(input.title)) v = pick(d, /steel\s?book/i, 'Steelbook');
     else if (/^region code$/i.test(d.name) && /region[\s-]*free|all regions/i.test(text)) v = pick(d, /region free|all region/i, 'Region Free');
+    else if (/country.*(origin|manufacture)/i.test(d.name) && input.countryOfOrigin) v = countryValue(input.countryOfOrigin, d.values) ?? (d.freeText ? countryValue(input.countryOfOrigin) : null);
     if (v) out[d.name] = [v];
   }
   return out;

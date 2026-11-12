@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cleanAspects, cleanDescription, DESCRIPTION_STYLE, ebayQuantity, ebaySku, gtinFields, inferAspects, inferFormat, inferMovieTitle, normalizeStyles, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
+import { cleanAspects, cleanDescription, countryValue, DESCRIPTION_STYLE, ebayQuantity, ebaySku, gtinFields, inferAspects, inferFormat, inferMovieTitle, normalizeStyles, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
 
 test('title template dedupes brand and limits to 80 chars', () => {
   assert.equal(renderTitle('{brand} {title} {options}', { brand: 'Sony', title: 'Sony WH-1000XM5 Headphones', options: 'Black' }), 'Sony WH-1000XM5 Headphones Black');
@@ -136,6 +136,17 @@ test('inferMovieTitle extracts the movie name', () => {
   assert.equal(inferMovieTitle('Superman (2025) 4K Blu-ray Steelbook'), 'Superman');
   assert.equal(inferMovieTitle('Tokyo Ghoul - The Complete Series Blu-ray'), 'Tokyo Ghoul');
   assert.equal(inferMovieTitle('Inception'), 'Inception');
+});
+
+test('countryValue maps Shopify ISO codes to eBay country values', () => {
+  assert.equal(countryValue('KR', ['United Kingdom', 'Korea, Republic of', 'Japan']), 'Korea, Republic of');
+  assert.equal(countryValue('KR', ['South Korea']), 'South Korea');
+  assert.equal(countryValue('JP', ['United Kingdom', 'Japan']), 'Japan');
+  assert.equal(countryValue('KR'), 'South Korea');
+  assert.equal(countryValue('ZZZ'), null);
+  assert.equal(countryValue('KR', ['Japan']), null);
+  const defs = [{ name: 'Country of Origin', values: ['United Kingdom', 'South Korea'], freeText: true }];
+  assert.deepEqual(inferAspects({ title: 'x', countryOfOrigin: 'KR' }, defs), { 'Country of Origin': ['South Korea'] });
 });
 
 test('inferAspects fills only empty aspects using allowed values', () => {

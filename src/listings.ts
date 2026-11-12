@@ -269,7 +269,8 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
     }
     if (category?.id) {
       const defs = await ebay.getAspects(category.id).catch(() => []);
-      Object.assign(aspects, inferAspects({ title: product.title, description: stripHtml(product.descriptionHtml ?? ''), brand }, defs, aspects));
+      const countryOfOrigin = groupVariants[0].inventoryItem.countryCodeOfOrigin;
+      Object.assign(aspects, inferAspects({ title: product.title, description: stripHtml(product.descriptionHtml ?? ''), brand, countryOfOrigin }, defs, aspects));
     }
     const fullTitle = fullProductTitle(product.title, asGroup ? null : first.variant_title);
     const title = renderTitle(profile?.title_template || settings.titleTemplate, {

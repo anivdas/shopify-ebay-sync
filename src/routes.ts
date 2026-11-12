@@ -290,7 +290,10 @@ router.post('/api/listings/:id/infer-aspects', async (ctx) => {
   if (!categoryId) throw new HttpError(400, 'Choose an eBay category first');
   const defs = await ebay.getAspects(categoryId);
   const title = l.product_title || l.title;
-  return { aspects: inferAspects({ title, description: stripHtml(l.description_html), brand: l.brand }, defs, ctx.body?.aspects ?? {}) };
+  const firstVariant = L.getItems(l.id)[0]?.shopify_variant_id;
+  const product = await shopify.getProduct(l.shopify_product_id).catch(() => null);
+  const countryOfOrigin = product?.variants.nodes.find((v) => v.id === firstVariant)?.inventoryItem.countryCodeOfOrigin ?? null;
+  return { aspects: inferAspects({ title, description: stripHtml(l.description_html), brand: l.brand, countryOfOrigin }, defs, ctx.body?.aspects ?? {}) };
 });
 
 router.post('/api/alerts/test', async () => {
