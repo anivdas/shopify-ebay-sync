@@ -122,6 +122,9 @@ function Extras({ status }: { status: any }) {
               </a>{' '}
               (Support, then Tickets, then Application Growth Check).
             </li>
+            <li>
+              If it says your account is <b>INACTIVE</b>, first open <b>Profile &amp; Contacts</b>, click <b>Edit</b> under Primary Contact, then <b>Save</b>, then <b>Edit</b> again, then <b>Activate Support</b>. Then come back to Application Growth Check.
+            </li>
             <li>Start a new request for your <b>Production</b> keyset and choose access to a restricted API: <b>Buy, Marketplace Insights API</b>.</li>
             <li>
               Describe your use case. You can adapt: <i>"I'm an eBay seller (store subscriber). My self-hosted tool reads 90-day sold prices of identical brand-new items (by UPC) to price my own listings competitively. Data is only shown to me, not redistributed or resold, and only aggregated prices are stored."</i>
