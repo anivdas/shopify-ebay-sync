@@ -128,7 +128,7 @@ export function Products() {
           </div>
         )}
         <div className="scrollbar-thin overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[760px]">
             <thead className="border-b border-zinc-100 dark:border-white/[0.06]">
               <tr>
                 <th className="table-head w-10" />
@@ -148,26 +148,26 @@ export function Products() {
                       <td className="table-cell">
                         <input type="checkbox" className="size-4 accent-brand-500" disabled={fullyLinked(p)} checked={!!selected[p.id]} onChange={() => toggleProduct(p)} />
                       </td>
-                      <td className="table-cell">
+                      <td className="table-cell w-full max-w-0">
                         <div className="flex items-center gap-3">
-                          {p.image ? <img src={`${p.image}${p.image.includes('?') ? '&' : '?'}width=80`} className="size-11 rounded-lg object-cover ring-1 ring-zinc-200 dark:ring-white/10" alt="" /> : <div className="size-11 rounded-lg bg-zinc-100 dark:bg-white/5" />}
-                          <div className="min-w-0">
+                          {p.image ? <img src={`${p.image}${p.image.includes('?') ? '&' : '?'}width=80`} className="size-11 shrink-0 rounded-lg object-cover ring-1 ring-zinc-200 dark:ring-white/10" alt="" /> : <div className="size-11 shrink-0 rounded-lg bg-zinc-100 dark:bg-white/5" />}
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
-                              <button className="text-zinc-400 hover:text-zinc-700" title="Show variants" onClick={() => toggleExpand(p)}>
+                              <button className="shrink-0 text-zinc-400 hover:text-zinc-700" title="Show variants" onClick={() => toggleExpand(p)}>
                                 {variants ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                               </button>
-                              <span className="truncate font-medium">{p.title}</span>
+                              <span className="truncate font-medium" title={p.title}>{p.title}</span>
                               {p.status !== 'ACTIVE' && <Badge>{p.status.toLowerCase()}</Badge>}
                             </div>
-                            <div className="pl-5 text-xs text-zinc-500">
+                            <div className="truncate pl-5 text-xs text-zinc-500">
                               {p.vendor || <span className="text-amber-600">no brand</span>}
                               {p.variantsCount > 1 && ` · ${p.variantsCount} variants`}
                             </div>
                           </div>
                         </div>
                       </td>
-                      <td className="table-cell tabular-nums">{p.minPrice === p.maxPrice ? money(p.minPrice, currency) : `${money(p.minPrice, currency)} – ${money(p.maxPrice, currency)}`}</td>
-                      <td className="table-cell tabular-nums">{p.totalInventory ?? '—'}</td>
+                      <td className="table-cell whitespace-nowrap tabular-nums">{p.minPrice === p.maxPrice ? money(p.minPrice, currency) : `${money(p.minPrice, currency)} – ${money(p.maxPrice, currency)}`}</td>
+                      <td className="table-cell whitespace-nowrap tabular-nums">{p.totalInventory ?? '—'}</td>
                       <td className="table-cell">
                         <div className="space-y-1">
                           {p.linked ? (
@@ -191,7 +191,7 @@ export function Products() {
                           <ExceptionPicker product={p} onChanged={list.reload} />
                         </div>
                       </td>
-                      <td className="table-cell text-right">
+                      <td className="table-cell whitespace-nowrap text-right">
                         <div className="flex justify-end gap-1">
                           <Button variant="ghost" title="Check eBay market" onClick={() => setMarket({ productId: p.id, title: p.title })}>
                             <LineIcon className="size-4" />
