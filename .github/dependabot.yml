@@ -4,14 +4,34 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Only suggest versions that have been public for a week (supply-chain safety)
+    cooldown:
+      default-days: 7
     groups:
-      all-npm:
-        patterns: ['*']
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Major upgrades are done deliberately, not automatically
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
+
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
+    ignore:
+      # Stay on the Node.js LTS line (24); odd-numbered releases like 25 are short-lived
+      - dependency-name: node
+        update-types: [version-update:semver-major]
