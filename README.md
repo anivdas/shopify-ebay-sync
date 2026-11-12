@@ -162,7 +162,9 @@ By default the app *checks* Shopify every few minutes and needs no public intern
    ```yaml
          - PUBLIC_URL=https://sync.yourdomain.com
          - COOKIE_SECURE=true
+         - TRUST_PROXY=true
    ```
+   `TRUST_PROXY=true` lets login rate-limiting see real visitor IPs through the tunnel. Only set it when the app is behind a proxy or tunnel, and don't also expose port 8080 to the internet.
 6. In the app, go to **Settings → Sync & alerts → Instant Shopify updates**, enter `https://sync.yourdomain.com` and click **Register webhooks**.
 7. *(Optional)* In your eBay RuName settings, set **auth accepted URL** to `https://sync.yourdomain.com/auth/ebay/callback`. eBay sign-in then returns to the app automatically.
 

@@ -5,7 +5,6 @@
 - `npm run check` – typecheck (server + web) + tests + UI build. Run before committing.
 - `npm test` – node:test suites in `test/` (Shopify/eBay APIs are mocked via global fetch)
 - `npm run dev` / `npm run dev:web` – server on :8080, Vite UI on :5173
-- Local Node on this Windows machine (no system Node): `export PATH="/d/Devin/.tools/node-v24.22.2-win-x64:$PATH"`
 
 ## Conventions
 - Server: TypeScript executed directly by Node 24 type stripping. Only erasable syntax (no enums/parameter properties); relative imports use `.ts` extensions.

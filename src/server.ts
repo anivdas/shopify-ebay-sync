@@ -127,7 +127,10 @@ const server = createServer(async (req, res) => {
       query: url.searchParams,
       body,
       rawBody,
-      ip: (req.headers['cf-connecting-ip'] as string) || req.socket.remoteAddress || 'unknown',
+      ip:
+        (config.trustProxy && ((req.headers['cf-connecting-ip'] as string) || String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim())) ||
+        req.socket.remoteAddress ||
+        'unknown',
     };
     const result = await match.route.handler(ctx);
     if (!res.headersSent && result !== undefined) sendJson(res, 200, result);

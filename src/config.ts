@@ -33,6 +33,8 @@ export const config = {
   envPassword: env('APP_PASSWORD'),
   publicUrl: env('PUBLIC_URL').replace(/\/$/, ''),
   cookieSecure: env('COOKIE_SECURE') === 'true',
+  // Only trust client-IP headers when a reverse proxy/tunnel (e.g. Cloudflare) sets them
+  trustProxy: env('TRUST_PROXY') === 'true',
   version: '0.1.0',
 };
 
