@@ -6,6 +6,10 @@
 - `npm test` – node:test suites in `test/` (Shopify/eBay APIs are mocked via global fetch)
 - `npm run dev` / `npm run dev:web` – server on :8080, Vite UI on :5173
 
+## Workflow
+- Track every bug/feature as a GitHub issue (repo `anivdas/shopify-ebay-sync`). Reference it in the fixing commit with `Closes #N` so it closes on push.
+- After pushing, confirm the "CI & Docker image" workflow succeeded; `ghcr.io/anivdas/shopify-ebay-sync:latest` must match the new `sha-<commit>` tag.
+
 ## Conventions
 - Server: TypeScript executed directly by Node 24 type stripping. Only erasable syntax (no enums/parameter properties); relative imports use `.ts` extensions.
 - DB: `node:sqlite` (`src/db.ts`), schema created on startup with `CREATE TABLE IF NOT EXISTS`.
