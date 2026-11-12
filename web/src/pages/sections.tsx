@@ -167,7 +167,7 @@ export function EbayKeysSection({ onSaved }: { onSaved?: () => void }) {
         <h3 className="text-sm font-semibold">How to get free eBay developer keys (10 minutes)</h3>
         <Steps>
           <li>
-            Join the <A href="https://developer.ebay.com/signin">eBay Developers Program</A> using your eBay seller login. It's free.
+            Click <b>Join</b> on the <A href="https://developer.ebay.com/signin">eBay Developers Program</A> site to create a free developer account. It's separate from your seller login; you'll link your seller account in the next step. <b>New accounts are reviewed by eBay and can take a business day to be approved.</b> Meanwhile you can do the other setup steps.
           </li>
           <li>
             Go to <A href="https://developer.ebay.com/my/keys">Application Keys</A> and create a <b>Production</b> keyset. If eBay asks about <i>Marketplace Account Deletion</i> notifications, choose the option to <b>opt out</b>, since this app doesn't store eBay buyers' personal data.

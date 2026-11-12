@@ -109,7 +109,7 @@ When you first open the app you create a dashboard password. The wizard then wal
 
 1. **Connect Shopify.** In the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard), create an app and give it the `write_products`, `read_inventory`, `write_inventory` and `read_locations` scopes. `write_products` lets the app fix SKUs, barcodes and costs for you. Release it and install it on your store. Paste the **Client ID** and **Client secret** into the app.
    - If you already have an older custom app with a `shpat_…` token, you can use that instead.
-2. **eBay developer keys.** Join the free [eBay Developers Program](https://developer.ebay.com/) and create a **Production** keyset. Copy the **App ID**, **Cert ID** and **RuName**.
+2. **eBay developer keys.** Join the free [eBay Developers Program](https://developer.ebay.com/). This is a separate account from your seller login, and eBay takes about **one business day** to approve it. Then create a **Production** keyset. Copy the **App ID**, **Cert ID** and **RuName**.
    - When eBay asks about *Marketplace Account Deletion* notifications, choose to **opt out**. This app doesn't store eBay buyers' personal data.
 3. **Connect your eBay account.** Sign in to eBay and click Agree.
    - If your app isn't on HTTPS, copy the address of the page eBay sends you to and paste it into the app.
