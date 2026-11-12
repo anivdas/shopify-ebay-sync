@@ -482,6 +482,7 @@ function AspectsEditor({ listingId, categoryId, aspects, variesBy, items, kind, 
   const [autoFilling, setAutoFilling] = useState(false);
   /** null = not tried yet; otherwise the aspect names filled by the last auto-fill */
   const [filled, setFilled] = useState<string[] | null>(null);
+  const [fillNotes, setFillNotes] = useState<string[]>([]);
   const optionNames = [...new Set(items.flatMap((i) => Object.keys(i.options)))];
   const defs = data?.aspects ?? [];
   const known = new Set(defs.map((d) => d.name));
@@ -499,11 +500,13 @@ function AspectsEditor({ listingId, categoryId, aspects, variesBy, items, kind, 
   const autoFill = async () => {
     setAutoFilling(true);
     try {
-      const r = await post<{ aspects: Record<string, string[]> }>(`/api/listings/${listingId}/infer-aspects`, { categoryId, aspects });
+      const r = await post<{ aspects: Record<string, string[]>; notes?: string[] }>(`/api/listings/${listingId}/infer-aspects`, { categoryId, aspects });
       setFilled(Object.keys(r.aspects));
+      setFillNotes(r.notes?.length ? r.notes : Object.keys(r.aspects).length ? [] : ['Nothing to fill: the item specifics it can work out are already filled in.']);
       if (Object.keys(r.aspects).length) onChange({ ...aspects, ...r.aspects });
-    } catch {
+    } catch (e) {
       setFilled([]);
+      setFillNotes([`Auto-fill failed: ${(e as Error).message}`]);
     } finally {
       setAutoFilling(false);
     }
@@ -545,6 +548,15 @@ function AspectsEditor({ listingId, categoryId, aspects, variesBy, items, kind, 
         <div className="mb-4">
           <Callout kind="info">
             Filled in from the product title: <b>{filled.join(', ')}</b>. Check them, then click Save.
+          </Callout>
+        </div>
+      )}
+      {fillNotes.length > 0 && (
+        <div className="mb-4">
+          <Callout kind="warn">
+            {fillNotes.map((n) => (
+              <div key={n}>{n}</div>
+            ))}
           </Callout>
         </div>
       )}

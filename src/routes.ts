@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { runAutoList } from './autolist.ts';
 import * as catalog from './catalog.ts';
 import { eligibility, listOverrides, setOverride } from './rules.ts';
-import { inferAspects, renderDescription, smartTitle, stripHtml } from './listing-builder.ts';
+import { countryValue, inferAspects, renderDescription, smartTitle, stripHtml } from './listing-builder.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
 import { all, defaultSettings, get, getSettings, getState, json, run, setState, updateSettings } from './db.ts';
@@ -291,9 +291,19 @@ router.post('/api/listings/:id/infer-aspects', async (ctx) => {
   const defs = await ebay.getAspects(categoryId);
   const title = l.product_title || l.title;
   const firstVariant = L.getItems(l.id)[0]?.shopify_variant_id;
-  const product = await shopify.getProduct(l.shopify_product_id).catch(() => null);
-  const countryOfOrigin = product?.variants.nodes.find((v) => v.id === firstVariant)?.inventoryItem.countryCodeOfOrigin ?? null;
-  return { aspects: inferAspects({ title, description: stripHtml(l.description_html), brand: l.brand, countryOfOrigin }, defs, ctx.body?.aspects ?? {}) };
+  const product = await shopify.getProduct(l.shopify_product_id);
+  const variant = product?.variants.nodes.find((v) => v.id === firstVariant) ?? product?.variants.nodes[0];
+  const countryOfOrigin = variant?.inventoryItem.countryCodeOfOrigin ?? null;
+  const existing = (ctx.body?.aspects ?? {}) as Record<string, string[]>;
+  const aspects = inferAspects({ title, description: stripHtml(l.description_html), brand: l.brand, countryOfOrigin }, defs, existing);
+  // Explain skipped country so a missed auto-fill is diagnosable instead of silent.
+  const notes: string[] = [];
+  const countryDef = defs.find((d) => /country.*(origin|manufacture)/i.test(d.name));
+  if (countryDef && !existing[countryDef.name]?.length && !aspects[countryDef.name]) {
+    if (!countryOfOrigin) notes.push(`${countryDef.name}: this product has no country of origin in Shopify.`);
+    else notes.push(`${countryDef.name}: Shopify says "${countryOfOrigin}" (${countryValue(countryOfOrigin) ?? 'unknown code'}), but none of eBay's ${countryDef.values.length} values matched it. Please pick it from the list.`);
+  }
+  return { aspects, notes };
 });
 
 router.post('/api/alerts/test', async () => {
