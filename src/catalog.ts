@@ -3,7 +3,7 @@ import { logActivity } from './log.ts';
 import * as shopify from './shopify.ts';
 import { generateSku, isUsableSku, uniquify } from './sku.ts';
 
-export type IssueCode = 'sku_missing' | 'sku_duplicate' | 'sku_invalid' | 'barcode_missing' | 'barcode_invalid' | 'not_tracked' | 'no_weight' | 'no_cost' | 'no_vendor' | 'no_image' | 'small_image';
+export type IssueCode = 'sku_missing' | 'sku_duplicate' | 'sku_invalid' | 'barcode_missing' | 'barcode_invalid' | 'not_tracked' | 'no_weight' | 'no_cost' | 'no_country' | 'no_vendor' | 'no_image' | 'small_image';
 
 export const ISSUE_INFO: Record<IssueCode, { label: string; severity: 'high' | 'medium' | 'low'; help: string }> = {
   sku_missing: { label: 'No SKU', severity: 'high', help: 'eBay sales are matched to Shopify by SKU.' },
@@ -14,6 +14,7 @@ export const ISSUE_INFO: Record<IssueCode, { label: string; severity: 'high' | '
   not_tracked: { label: 'Stock not tracked', severity: 'high', help: "Shopify isn't counting stock for this variant, so it can't sync." },
   no_weight: { label: 'No weight', severity: 'medium', help: 'Calculated shipping on eBay needs the product weight (Shopify product > Shipping > Weight).' },
   no_cost: { label: 'No cost', severity: 'low', help: 'Add "Cost per item" for profit reports.' },
+  no_country: { label: 'No country of origin', severity: 'low', help: 'Shown on eBay as "Country of Origin". Without it eBay may fill in its own (possibly wrong) guess. Use the 2-letter code, e.g. US, JP, KR, GB.' },
   no_vendor: { label: 'No brand (vendor)', severity: 'medium', help: 'The vendor is used as the eBay Brand.' },
   no_image: { label: 'No photo', severity: 'high', help: 'eBay needs at least one photo.' },
   small_image: { label: 'Photo under 500px', severity: 'low', help: "eBay's minimum is 500px on the longest side." },
@@ -30,6 +31,7 @@ export type CatalogRow = {
   barcode: string | null;
   tracked: boolean;
   cost: number | null;
+  country: string | null;
   qty: number | null;
   options: { name: string; value: string }[];
   image: string | null;
@@ -63,6 +65,7 @@ export async function scanCatalog(): Promise<{ at: string; rows: CatalogRow[] }>
         barcode: shopify.pickBarcode(v.barcodes.nodes),
         tracked: v.inventoryItem.tracked,
         cost: v.inventoryItem.unitCost ? Number(v.inventoryItem.unitCost.amount) : null,
+        country: v.inventoryItem.countryCodeOfOrigin ?? null,
         qty: v.inventoryQuantity,
         options: v.selectedOptions.filter((o) => o.value !== 'Default Title'),
         image: img?.url ?? null,
@@ -76,6 +79,7 @@ export async function scanCatalog(): Promise<{ at: string; rows: CatalogRow[] }>
       if (!r.tracked) r.issues.push('not_tracked');
       if (!(v.inventoryItem.measurement?.weight?.value && v.inventoryItem.measurement.weight.value > 0)) r.issues.push('no_weight');
       if (r.cost === null) r.issues.push('no_cost');
+      if (!r.country) r.issues.push('no_country');
       if (!r.vendor?.trim()) r.issues.push('no_vendor');
       if (!img) r.issues.push('no_image');
       else if (img.width && img.height && Math.max(img.width, img.height) < 500) r.issues.push('small_image');
@@ -126,7 +130,7 @@ export function proposeSkus(rows: CatalogRow[], mode: SkuMode) {
     }));
 }
 
-export type Change = { variantId: string; productId: string; sku?: string; barcode?: string; cost?: number | null; tracked?: boolean };
+export type Change = { variantId: string; productId: string; sku?: string; barcode?: string; cost?: number | null; tracked?: boolean; country?: string | null };
 
 /** Writes changes to Shopify grouped by product and remembers the previous values so the batch can be undone. */
 export async function applyChanges(changes: Change[], label: string) {
@@ -135,6 +139,7 @@ export async function applyChanges(changes: Change[], label: string) {
   for (const c of changes) {
     if (c.sku && !isUsableSku(c.sku)) throw new Error(`"${c.sku}" is not a valid SKU`);
     if (c.barcode && !/^\d{8,14}$/.test(c.barcode)) throw new Error(`"${c.barcode}" is not a valid barcode (digits only)`);
+    if (c.country && !/^[A-Z]{2}$/.test(c.country)) throw new Error(`"${c.country}" is not a 2-letter country code (e.g. US, JP, KR)`);
   }
   const undo: Change[] = changes.map((c) => {
     const prev = byVariant.get(c.variantId);
@@ -145,6 +150,7 @@ export async function applyChanges(changes: Change[], label: string) {
       ...(c.barcode !== undefined ? { barcode: prev?.barcode ?? '' } : {}),
       ...(c.cost !== undefined ? { cost: prev?.cost ?? null } : {}),
       ...(c.tracked !== undefined ? { tracked: prev?.tracked ?? false } : {}),
+      ...(c.country !== undefined ? { country: prev?.country ?? null } : {}),
     };
   });
   const groups = new Map<string, Change[]>();
@@ -153,7 +159,7 @@ export async function applyChanges(changes: Change[], label: string) {
   let done = 0;
   for (const [productId, list] of groups) {
     try {
-      await shopify.updateVariants(productId, list.map(({ variantId, sku, barcode, cost, tracked }) => ({ id: variantId, sku, barcode, cost, tracked })));
+      await shopify.updateVariants(productId, list.map(({ variantId, sku, barcode, cost, tracked, country }) => ({ id: variantId, sku, barcode, cost, tracked, country })));
       done += list.length;
       for (const c of list) {
         const row = byVariant.get(c.variantId);
@@ -162,6 +168,7 @@ export async function applyChanges(changes: Change[], label: string) {
         if (c.barcode !== undefined) row.barcode = c.barcode || null;
         if (c.cost !== undefined) row.cost = c.cost;
         if (c.tracked !== undefined) row.tracked = c.tracked;
+        if (c.country !== undefined) row.country = c.country || null;
       }
     } catch (e) {
       failed.push({ productId, error: (e as Error).message });

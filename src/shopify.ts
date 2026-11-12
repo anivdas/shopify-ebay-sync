@@ -240,15 +240,16 @@ export async function getProduct(id: string): Promise<ShopifyProduct | null> {
   return data.product ? normalizeProduct(data.product) : null;
 }
 
-export type VariantPatch = { id: string; sku?: string; barcode?: string; cost?: number | null; tracked?: boolean };
+export type VariantPatch = { id: string; sku?: string; barcode?: string; cost?: number | null; tracked?: boolean; country?: string | null };
 
-/** Updates SKU / barcode / cost / tracking for variants of one product in a single call (needs write_products). */
+/** Updates SKU / barcode / cost / tracking / country of origin for variants of one product in a single call (needs write_products). */
 export async function updateVariants(productId: string, patches: VariantPatch[]) {
   const variants = patches.map((p) => {
     const inventoryItem: Record<string, unknown> = {};
     if (p.sku !== undefined) inventoryItem.sku = p.sku;
     if (p.cost !== undefined) inventoryItem.cost = p.cost;
     if (p.tracked !== undefined) inventoryItem.tracked = p.tracked;
+    if (p.country !== undefined) inventoryItem.countryCodeOfOrigin = p.country || null;
     return {
       id: p.id,
       ...(Object.keys(inventoryItem).length ? { inventoryItem } : {}),

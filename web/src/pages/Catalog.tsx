@@ -12,7 +12,8 @@ export function Catalog() {
   const [filter, setFilter] = useState<string>('problems');
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(100);
-  const [edits, setEdits] = useState<Record<string, { barcode?: string; cost?: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { barcode?: string; cost?: string; country?: string }>>({});
+  const [fillCountry, setFillCountry] = useState('');
   const [skuOpen, setSkuOpen] = useState(false);
   const d = q.data;
   const issues = d?.issues ?? {};
@@ -40,8 +41,11 @@ export function Catalog() {
           productId: byId.get(variantId).productId,
           ...(e.barcode !== undefined ? { barcode: e.barcode.replace(/\D/g, '') } : {}),
           ...(e.cost !== undefined ? { cost: e.cost === '' ? null : Number(e.cost) } : {}),
+          ...(e.country !== undefined ? { country: e.country.trim().toUpperCase() || null } : {}),
         }));
-        const r = await post('/api/catalog/apply', { changes, label: 'Barcode/cost edits' });
+        const bad = changes.find((c) => c.country && !/^[A-Z]{2}$/.test(c.country));
+        if (bad) throw new Error(`"${bad.country}" is not a 2-letter country code (e.g. US, JP, KR)`);
+        const r = await post('/api/catalog/apply', { changes, label: 'Catalog edits' });
         setEdits({});
         q.setData(await post('/api/catalog/scan'));
         if (r.failed.length) throw new Error(`${r.done} saved, ${r.failed.length} product(s) failed: ${r.failed[0].error}`);
@@ -159,7 +163,7 @@ export function Catalog() {
           <Card
             padded={false}
             title={filter === 'problems' ? 'Variants that need attention' : filter === 'all' ? 'All variants' : issues[filter]?.label}
-            description={filter !== 'problems' && filter !== 'all' ? issues[filter]?.help : 'Edit barcodes and costs inline, then save.'}
+            description={filter !== 'problems' && filter !== 'all' ? issues[filter]?.help : 'Edit barcodes, costs and country of origin inline, then save.'}
             actions={
               <>
                 <select className="input w-auto py-1.5 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -182,6 +186,20 @@ export function Catalog() {
                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-400" />
                 <input className="input pl-9" placeholder="Filter by title, SKU, barcode or brand" value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
+              {filter === 'no_country' && rows.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  <span>Set country of origin for the {rows.length} variant(s) shown:</span>
+                  <input className="input w-20 py-1 font-mono uppercase" maxLength={2} placeholder="KR" value={fillCountry} onChange={(e) => setFillCountry(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))} />
+                  <Button
+                    className="px-2 py-1 text-xs"
+                    disabled={fillCountry.length !== 2}
+                    onClick={() => setEdits((s) => Object.fromEntries([...Object.entries(s), ...rows.map((r) => [r.variantId, { ...s[r.variantId], country: fillCountry }])]))}
+                  >
+                    Fill
+                  </Button>
+                  <span>Narrow the list with the search box first (e.g. a brand). Nothing is saved until you click Save.</span>
+                </div>
+              )}
             </div>
             {!rows.length ? (
               <Empty icon={<CheckCircle2 className="size-6" />} title="Nothing to fix here" description="Every variant in this view looks good." />
@@ -194,13 +212,14 @@ export function Catalog() {
                       <th className="table-head">SKU</th>
                       <th className="table-head">UPC / EAN</th>
                       <th className="table-head">Cost</th>
+                      <th className="table-head" title="Country of origin (2-letter code)">Origin</th>
                       <th className="table-head">Issues</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.05]">
                     {rows.slice(0, limit).map((r) => {
                       const e = edits[r.variantId] ?? {};
-                      const setE = (k: 'barcode' | 'cost', v: string) => setEdits((s) => ({ ...s, [r.variantId]: { ...s[r.variantId], [k]: v } }));
+                      const setE = (k: 'barcode' | 'cost' | 'country', v: string) => setEdits((s) => ({ ...s, [r.variantId]: { ...s[r.variantId], [k]: v } }));
                       const bc = e.barcode ?? r.barcode ?? '';
                       return (
                         <tr key={r.variantId} className="align-top">
@@ -231,6 +250,16 @@ export function Catalog() {
                           </td>
                           <td className="table-cell">
                             <input type="number" step={0.01} min={0} className="input w-24 py-1 text-xs" placeholder="0.00" value={e.cost ?? (r.cost ?? '')} onChange={(ev) => setE('cost', ev.target.value)} />
+                          </td>
+                          <td className="table-cell">
+                            <input
+                              className="input w-16 py-1 font-mono text-xs uppercase"
+                              maxLength={2}
+                              placeholder="--"
+                              title="Country of origin, e.g. US, JP, KR, GB"
+                              value={e.country ?? (r.country ?? '')}
+                              onChange={(ev) => setE('country', ev.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
+                            />
                           </td>
                           <td className="table-cell">
                             <div className="flex flex-wrap gap-1">
