@@ -1,0 +1,660 @@
+import { CheckCircle2, ExternalLink, KeyRound, Plug, RefreshCw, Unplug } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { api, post, put, useApi } from '../api.ts';
+import { Badge, Button, Callout, CopyField, Field, Toggle, useAction, useConfirm } from '../ui.tsx';
+
+export type Settings = Record<string, any>;
+
+export function useSettings() {
+  const q = useApi<{ settings: Settings; marketplaces: Record<string, any> }>('/api/settings');
+  const save = async (patch: Settings) => {
+    const r = await put<{ settings: Settings }>('/api/settings', patch);
+    q.setData((d) => (d ? { ...d, settings: r.settings } : d));
+    return r.settings;
+  };
+  return { settings: q.data?.settings ?? null, marketplaces: q.data?.marketplaces ?? {}, save, reload: q.reload };
+}
+
+/** Local editable copy of some settings keys with a Save button. */
+function useDraft(settings: Settings | null, keys: string[]) {
+  const [draft, setDraft] = useState<Settings>({});
+  useEffect(() => {
+    if (settings) setDraft(Object.fromEntries(keys.map((k) => [k, settings[k]])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
+  const set = (k: string, v: unknown) => setDraft((d) => ({ ...d, [k]: v }));
+  const dirty = settings ? keys.some((k) => draft[k] !== settings[k]) : false;
+  return { draft, set, dirty };
+}
+
+const A = ({ href, children }: { href: string; children: ReactNode }) => (
+  <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 font-medium text-brand-600 hover:underline dark:text-brand-400">
+    {children}
+    <ExternalLink className="size-3" />
+  </a>
+);
+
+export function Steps({ children }: { children: ReactNode }) {
+  return <ol className="list-decimal space-y-2 pl-5 text-sm text-zinc-600 marker:font-semibold marker:text-brand-500 dark:text-zinc-300">{children}</ol>;
+}
+
+function Secret({ label, value, onChange, fromEnv, hint }: { label: string; value: string; onChange: (v: string) => void; fromEnv?: boolean; hint?: ReactNode }) {
+  return (
+    <Field label={label} hint={fromEnv ? 'Set by an environment variable' : hint}>
+      <input type="password" autoComplete="off" className="input font-mono" value={value} disabled={fromEnv} onChange={(e) => onChange(e.target.value)} placeholder="Paste here" />
+    </Field>
+  );
+}
+
+// ======================= Shopify connection =======================
+
+export function ShopifySection({ onSaved }: { onSaved?: () => void }) {
+  const creds = useApi('/api/credentials');
+  const status = useApi('/api/status');
+  const { busy, run } = useAction();
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [legacy, setLegacy] = useState(false);
+  const c = creds.data?.credentials;
+  useEffect(() => {
+    if (!c) return;
+    setForm({ shopifyShop: c.shopifyShop.value, shopifyClientId: c.shopifyClientId.value, shopifyClientSecret: c.shopifyClientSecret.value, shopifyAccessToken: c.shopifyAccessToken.value });
+    setLegacy(!!c.shopifyAccessToken.set && !c.shopifyClientId.set);
+  }, [creds.data]);
+  const test = status.data?.shopify?.test;
+
+  const saveAndTest = () =>
+    run(
+      'save',
+      async () => {
+        await put('/api/credentials', legacy ? { ...form, shopifyClientId: '', shopifyClientSecret: '' } : { ...form, shopifyAccessToken: '' });
+        const r = await post('/api/credentials/test', { which: 'shopify' });
+        status.reload();
+        creds.reload();
+        onSaved?.();
+        if (!r.ok) throw new Error(r.error ?? `Missing permissions: ${r.missingScopes?.join(', ')}`);
+        return r;
+      },
+      (r: any) => `Connected to ${r.shop}`,
+    );
+
+  if (!c) return null;
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold">How to get your Shopify keys (5 minutes)</h3>
+        <Steps>
+          <li>
+            Open the <A href="https://dev.shopify.com/dashboard">Shopify Dev Dashboard</A> and sign in with the account that owns your store.
+          </li>
+          <li>
+            Click <b>Create app</b>, then name it something like <i>eBay Sync</i>.
+          </li>
+          <li>
+            Under <b>Versions</b>, create a version. Add these <b>Access scopes</b>: <code className="text-xs">read_products, read_inventory, write_inventory, read_locations</code>. For App URL you can use <code className="text-xs">https://example.com</code>. Click <b>Release</b>.
+          </li>
+          <li>
+            Go to <b>Home</b> and click <b>Install app</b>, then pick your store.
+          </li>
+          <li>
+            Open <b>Settings</b>, copy the <b>Client ID</b> and <b>Client secret</b>, and paste them here.
+          </li>
+        </Steps>
+        <Callout kind="info">Your keys are stored encrypted on your own server and are never sent anywhere except Shopify.</Callout>
+      </div>
+      <div className="space-y-4">
+        <Field label="Store address" hint="Just the part before .myshopify.com (e.g. my-store)">
+          <div className="flex items-center">
+            <input className="input rounded-r-none" value={form.shopifyShop ?? ''} disabled={c.shopifyShop.fromEnv} onChange={(e) => setForm({ ...form, shopifyShop: e.target.value })} placeholder="my-store" />
+            <span className="rounded-r-xl border border-l-0 border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 dark:border-white/10 dark:bg-white/[0.06]">.myshopify.com</span>
+          </div>
+        </Field>
+        {!legacy ? (
+          <>
+            <Field label="Client ID">
+              <input className="input font-mono" value={form.shopifyClientId ?? ''} disabled={c.shopifyClientId.fromEnv} onChange={(e) => setForm({ ...form, shopifyClientId: e.target.value })} />
+            </Field>
+            <Secret label="Client secret" value={form.shopifyClientSecret ?? ''} fromEnv={c.shopifyClientSecret.fromEnv} onChange={(v) => setForm({ ...form, shopifyClientSecret: v })} />
+          </>
+        ) : (
+          <Secret label="Admin API access token" hint="Starts with shpat_ (from an older custom app created in Shopify admin)" value={form.shopifyAccessToken ?? ''} fromEnv={c.shopifyAccessToken.fromEnv} onChange={(v) => setForm({ ...form, shopifyAccessToken: v })} />
+        )}
+        <button className="text-xs text-zinc-500 underline-offset-2 hover:underline" onClick={() => setLegacy(!legacy)}>
+          {legacy ? 'Use Client ID & secret instead (recommended)' : 'I have an older custom app with a shpat_ access token'}
+        </button>
+        <div className="flex items-center gap-3 pt-1">
+          <Button variant="primary" loading={busy === 'save'} onClick={saveAndTest}>
+            <Plug className="size-4" /> Save & test connection
+          </Button>
+          {test?.ok && (
+            <Badge color="green">
+              <CheckCircle2 className="size-3" /> {test.shop} ({test.currency})
+            </Badge>
+          )}
+        </div>
+        {test && !test.ok && (
+          <Callout kind="error" title="Shopify connection failed">
+            {test.error ?? `Missing permissions: ${test.missingScopes?.join(', ')}. Add them to a new app version, release it and approve the update in your store.`}
+          </Callout>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ======================= eBay keys =======================
+
+export function EbayKeysSection({ onSaved }: { onSaved?: () => void }) {
+  const creds = useApi('/api/credentials');
+  const { busy, run } = useAction();
+  const [form, setForm] = useState<Record<string, string>>({});
+  const c = creds.data?.credentials;
+  useEffect(() => {
+    if (!c) return;
+    setForm({
+      ebayEnv: c.ebayEnv.value || 'production',
+      ebayMarketplaceId: c.ebayMarketplaceId.value || 'EBAY_US',
+      ebayClientId: c.ebayClientId.value,
+      ebayClientSecret: c.ebayClientSecret.value,
+      ebayRuName: c.ebayRuName.value,
+    });
+  }, [creds.data]);
+  if (!c) return null;
+  const callback = creds.data.callbackUrl as string;
+  const httpsCallback = callback.startsWith('https://');
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_1.1fr]">
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold">How to get free eBay developer keys (10 minutes)</h3>
+        <Steps>
+          <li>
+            Join the <A href="https://developer.ebay.com/signin">eBay Developers Program</A> using your eBay seller login. It's free.
+          </li>
+          <li>
+            Go to <A href="https://developer.ebay.com/my/keys">Application Keys</A> and create a <b>Production</b> keyset. If eBay asks about <i>Marketplace Account Deletion</i> notifications, choose the option to <b>opt out</b>, since this app doesn't store eBay buyers' personal data.
+          </li>
+          <li>
+            Copy the <b>App ID (Client ID)</b> and <b>Cert ID (Client Secret)</b>.
+          </li>
+          <li>
+            Click <b>User Tokens</b>, then <b>Get a Token from eBay via Your Application</b>, then <b>Add eBay Redirect URL</b>. Fill in a display title and a privacy policy URL (your store's privacy page works).
+            {httpsCallback ? (
+              <> Set <b>Your auth accepted URL</b> to the address below:</>
+            ) : (
+              <> You can leave <b>Your auth accepted URL</b> as the default. You'll paste the link back here after signing in.</>
+            )}
+          </li>
+          <li>
+            Save, then copy the <b>RuName</b> (it looks like <code className="text-xs">YourName-AppName-PRD-abc123</code>).
+          </li>
+        </Steps>
+        {httpsCallback && <CopyField value={callback} />}
+      </div>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="eBay site">
+            <select className="input" value={form.ebayMarketplaceId} disabled={c.ebayMarketplaceId.fromEnv} onChange={(e) => setForm({ ...form, ebayMarketplaceId: e.target.value })}>
+              {Object.entries(creds.data.marketplaces).map(([k, v]: any) => (
+                <option key={k} value={k}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Environment" hint="Use Sandbox only for testing">
+            <select className="input" value={form.ebayEnv} disabled={c.ebayEnv.fromEnv} onChange={(e) => setForm({ ...form, ebayEnv: e.target.value })}>
+              <option value="production">Production (real)</option>
+              <option value="sandbox">Sandbox (test)</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="App ID (Client ID)">
+          <input className="input font-mono" value={form.ebayClientId ?? ''} disabled={c.ebayClientId.fromEnv} onChange={(e) => setForm({ ...form, ebayClientId: e.target.value })} />
+        </Field>
+        <Secret label="Cert ID (Client secret)" value={form.ebayClientSecret ?? ''} fromEnv={c.ebayClientSecret.fromEnv} onChange={(v) => setForm({ ...form, ebayClientSecret: v })} />
+        <Field label="RuName (redirect URL name)">
+          <input className="input font-mono" value={form.ebayRuName ?? ''} disabled={c.ebayRuName.fromEnv} onChange={(e) => setForm({ ...form, ebayRuName: e.target.value })} />
+        </Field>
+        <Button
+          variant="primary"
+          loading={busy === 'save'}
+          onClick={() =>
+            run(
+              'save',
+              async () => {
+                await put('/api/credentials', form);
+                creds.reload();
+                onSaved?.();
+              },
+              'eBay keys saved',
+            )
+          }
+        >
+          <KeyRound className="size-4" /> Save eBay keys
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ======================= eBay account connection =======================
+
+export function EbayConnectSection({ onSaved }: { onSaved?: () => void }) {
+  const status = useApi('/api/status');
+  const { busy, run } = useAction();
+  const confirm = useConfirm();
+  const [pasted, setPasted] = useState('');
+  const [opened, setOpened] = useState(false);
+  const e = status.data?.ebay;
+  if (!e) return null;
+  if (!e.configured) return <Callout kind="warn">Add your eBay developer keys first.</Callout>;
+  const refresh = () => {
+    status.reload();
+    onSaved?.();
+  };
+  return (
+    <div className="space-y-4">
+      {e.connected ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge color="green">
+            <CheckCircle2 className="size-3" /> Connected{e.test?.username ? ` as ${e.test.username}` : ''}
+          </Badge>
+          {e.refreshExpires && <span className="text-xs text-zinc-500">Connection valid until {new Date(e.refreshExpires).toLocaleDateString()}</span>}
+          <Button loading={busy === 'test'} onClick={() => run('test', () => post('/api/credentials/test', { which: 'ebay' }).then(refresh), 'eBay connection OK')}>
+            <RefreshCw className="size-4" /> Test
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              if (await confirm({ title: 'Disconnect eBay?', body: 'Syncing stops until you reconnect.', confirm: 'Disconnect', danger: true })) run('dc', () => post('/api/ebay/disconnect').then(refresh));
+            }}
+          >
+            <Unplug className="size-4" /> Disconnect
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">Sign in to eBay and approve access. The app needs permission to manage listings, read orders and fees, and see your seller standards.</p>
+          <Button
+            variant="primary"
+            loading={busy === 'url'}
+            onClick={() =>
+              run('url', async () => {
+                const r = await api('/api/ebay/connect-url');
+                window.open(r.url, '_blank');
+                setOpened(true);
+              })
+            }
+          >
+            <Plug className="size-4" /> Connect eBay account
+          </Button>
+          {opened && (
+            <div className="space-y-2 rounded-xl border border-dashed border-zinc-300 p-4 dark:border-white/15">
+              <p className="text-sm">
+                After you click <b>Agree</b> on eBay, you'll land on a page. If it doesn't come back here automatically, <b>copy the full address from your browser's address bar</b> and paste it below.
+              </p>
+              <div className="flex gap-2">
+                <input className="input font-mono text-xs" placeholder="https://...?code=v%5E1.1%23..." value={pasted} onChange={(ev) => setPasted(ev.target.value)} />
+                <Button variant="primary" loading={busy === 'code'} disabled={!pasted} onClick={() => run('code', () => post('/api/ebay/code', { code: pasted }).then(refresh), 'eBay connected!')}>
+                  Finish
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {e.test && e.test.ok === false && <Callout kind="error">{e.test.error}</Callout>}
+    </div>
+  );
+}
+
+// ======================= Business policies & location =======================
+
+export function PoliciesSection({ onSaved }: { onSaved?: () => void }) {
+  const { settings, save } = useSettings();
+  const status = useApi('/api/status');
+  const policies = useApi(status.data?.ebay?.connected ? '/api/ebay/policies' : null);
+  const locations = useApi(status.data?.ebay?.connected ? '/api/ebay/locations' : null);
+  const shopLocations = useApi(status.data?.shopify?.test?.ok ? '/api/shopify/locations' : null);
+  const { busy, run } = useAction();
+  const { draft, set, dirty } = useDraft(settings, ['fulfillmentPolicyId', 'paymentPolicyId', 'returnPolicyId', 'merchantLocationKey', 'shopifyLocationId']);
+  const [newLoc, setNewLoc] = useState({ name: 'Main warehouse', postalCode: '', city: '', stateOrProvince: '' });
+
+  if (!status.data?.ebay?.connected) return <Callout kind="warn">Connect your eBay account first.</Callout>;
+  const optedOut = status.data.ebay.test?.policiesOptIn === false;
+  const p = policies.data;
+  const empty = p && (!p.fulfillment.length || !p.payment.length || !p.returns.length);
+  const select = (key: string, label: string, list: { id: string; name: string }[] = [], hint?: string) => (
+    <Field label={label} hint={hint}>
+      <select className="input" value={draft[key] ?? ''} onChange={(e) => set(key, e.target.value)}>
+        <option value="">Select...</option>
+        {list.map((x) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </select>
+    </Field>
+  );
+
+  return (
+    <div className="space-y-6">
+      {(optedOut || policies.error) && (
+        <Callout kind="warn" title="Business policies aren't enabled on your eBay account">
+          <p>eBay requires business policies (shipping, payment and returns) for listings created through its API.</p>
+          <Button className="mt-2" loading={busy === 'optin'} onClick={() => run('optin', () => post('/api/ebay/opt-in'), (r: any) => r.note)}>
+            Enable business policies
+          </Button>
+        </Callout>
+      )}
+      {empty && (
+        <Callout kind="info" title="Create your policies on eBay">
+          In eBay Seller Hub, go to <b>Account</b>, then <b>Business policies</b>, and create at least one shipping, one payment and one return policy. Then click refresh.
+        </Callout>
+      )}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Default business policies</h3>
+          <Button variant="ghost" onClick={() => policies.reload()}>
+            <RefreshCw className="size-4" /> Refresh
+          </Button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {select('fulfillmentPolicyId', 'Shipping policy', p?.fulfillment)}
+          {select('paymentPolicyId', 'Payment policy', p?.payment)}
+          {select('returnPolicyId', 'Return policy', p?.returns)}
+        </div>
+      </div>
+      <div>
+        <h3 className="mb-3 text-sm font-semibold">Where you ship from</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {select(
+            'merchantLocationKey',
+            'eBay inventory location',
+            (locations.data?.locations ?? []).map((l: any) => ({ id: l.merchantLocationKey, name: `${l.name ?? l.merchantLocationKey}${l.location?.address?.postalCode ? ` (${l.location.address.postalCode})` : ''}` })),
+            'Required by eBay. Create one below if the list is empty.',
+          )}
+          <Field label="Shopify location for eBay sales" hint="Where stock is deducted when something sells on eBay">
+            <select className="input" value={draft.shopifyLocationId ?? ''} onChange={(e) => set('shopifyLocationId', e.target.value)}>
+              <option value="">Automatic (location with the most stock)</option>
+              {(shopLocations.data?.locations ?? []).map((l: any) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        {locations.data && !locations.data.locations.length && (
+          <div className="mt-4 grid gap-3 rounded-xl border border-dashed border-zinc-300 p-4 sm:grid-cols-5 dark:border-white/15">
+            <input className="input sm:col-span-2" placeholder="Name" value={newLoc.name} onChange={(e) => setNewLoc({ ...newLoc, name: e.target.value })} />
+            <input className="input" placeholder="ZIP / postal code" value={newLoc.postalCode} onChange={(e) => setNewLoc({ ...newLoc, postalCode: e.target.value })} />
+            <input className="input" placeholder="City" value={newLoc.city} onChange={(e) => setNewLoc({ ...newLoc, city: e.target.value })} />
+            <input className="input" placeholder="State" value={newLoc.stateOrProvince} onChange={(e) => setNewLoc({ ...newLoc, stateOrProvince: e.target.value })} />
+            <Button
+              className="sm:col-span-5 sm:justify-self-start"
+              loading={busy === 'loc'}
+              disabled={!newLoc.postalCode}
+              onClick={() =>
+                run(
+                  'loc',
+                  async () => {
+                    const r = await post('/api/ebay/locations', newLoc);
+                    set('merchantLocationKey', r.key);
+                    locations.reload();
+                  },
+                  'Location created',
+                )
+              }
+            >
+              Create location
+            </Button>
+          </div>
+        )}
+      </div>
+      <Button variant="primary" disabled={!dirty} loading={busy === 'save'} onClick={() => run('save', () => save(draft).then(() => onSaved?.()), 'Saved')}>
+        Save
+      </Button>
+    </div>
+  );
+}
+
+// ======================= Pricing =======================
+
+export function PricingSection({ onSaved }: { onSaved?: () => void }) {
+  const { settings, save } = useSettings();
+  const { busy, run } = useAction();
+  const keys = ['markupMinPct', 'markupMaxPct', 'undercutAmount', 'charmPricing', 'autoReprice', 'useShopifySalePrice', 'priceGuardPct', 'ebayFeePct', 'ebayFixedFee', 'avgShippingCost', 'bestOfferDefault', 'bestOfferAutoAcceptPct', 'bestOfferAutoDecline', 'soldLookbackDays'];
+  const { draft, set } = useDraft(settings, keys);
+  if (!settings) return null;
+  const n = (k: string, label: string, opts: { step?: number; suffix?: string; hint?: ReactNode } = {}) => (
+    <Field label={label} hint={opts.hint}>
+      <div className="relative">
+        <input type="number" step={opts.step ?? 0.01} className="input pr-10" value={draft[k] ?? ''} onChange={(e) => set(k, e.target.value === '' ? '' : Number(e.target.value))} />
+        {opts.suffix && <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-zinc-400">{opts.suffix}</span>}
+      </div>
+    </Field>
+  );
+  const example = 100;
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl bg-gradient-to-br from-brand-500/10 to-violet-500/5 p-5 ring-1 ring-brand-500/15">
+        <p className="text-sm">
+          eBay prices are always kept between <b>+{draft.markupMinPct}%</b> and <b>+{draft.markupMaxPct}%</b> of your Shopify price. For example, a <b>${example}</b> Shopify item sells on eBay for{' '}
+          <b>
+            ${(example * (1 + draft.markupMinPct / 100)).toFixed(2)} to ${(example * (1 + draft.markupMaxPct / 100)).toFixed(2)}
+          </b>
+          {draft.autoReprice ? '. Within that range, the app positions you just below the cheapest identical brand-new listing.' : '.'}
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-3">
+        {n('markupMinPct', 'Minimum markup', { suffix: '%', step: 0.5, hint: 'Price floor: never lower than this' })}
+        {n('markupMaxPct', 'Maximum markup', { suffix: '%', step: 0.5, hint: 'Price ceiling: never higher than this' })}
+        {n('undercutAmount', 'Undercut competitors by', { suffix: '$', hint: 'How much below the cheapest competitor' })}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Toggle checked={!!draft.autoReprice} onChange={(v) => set('autoReprice', v)} label="Automatic repricing" description="Apply the market-based suggestion inside your range after each research run. Turn off to approve suggestions manually." />
+        <Toggle checked={!!draft.charmPricing} onChange={(v) => set('charmPricing', v)} label="Charm pricing (.99)" description="Round to $x.99 when it still fits your range." />
+        <Toggle checked={!!draft.useShopifySalePrice} onChange={(v) => set('useShopifySalePrice', v)} label="Follow Shopify sales" description="When a Shopify item is on sale (has a compare-at price), base the eBay price on the sale price. Turn off to use the regular price." />
+        <Toggle checked={!!draft.bestOfferDefault} onChange={(v) => set('bestOfferDefault', v)} label="Best Offer on new listings" description="Only for single-variation listings (eBay doesn't allow Best Offer on variation listings)." />
+      </div>
+      {draft.bestOfferDefault && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {n('bestOfferAutoAcceptPct', 'Auto-accept offers at or above', { suffix: '%', step: 0.5, hint: 'Markup over the Shopify price' })}
+          <Toggle checked={!!draft.bestOfferAutoDecline} onChange={(v) => set('bestOfferAutoDecline', v)} label="Auto-decline below your floor" description={`Offers below +${draft.markupMinPct}% are declined automatically.`} />
+        </div>
+      )}
+      <div className="grid gap-4 sm:grid-cols-4">
+        {n('ebayFeePct', 'eBay fee estimate', { suffix: '%', hint: 'Used until real fees arrive' })}
+        {n('ebayFixedFee', 'Per-order fee', { suffix: '$' })}
+        {n('avgShippingCost', 'Your avg. shipping cost', { suffix: '$', hint: 'For profit estimates' })}
+        {n('priceGuardPct', 'Safety limit', { suffix: '%', step: 1, hint: 'Hold larger price jumps for review' })}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-4">{n('soldLookbackDays', 'Sold-price lookback', { suffix: 'days', step: 1, hint: '42 days = 6 weeks' })}</div>
+      <Button
+        variant="primary"
+        loading={busy === 'save'}
+        onClick={() =>
+          run(
+            'save',
+            async () => {
+              await save(draft);
+              await post('/api/settings/pricing-reviewed');
+              onSaved?.();
+            },
+            'Pricing rules saved',
+          )
+        }
+      >
+        Save pricing rules
+      </Button>
+    </div>
+  );
+}
+
+// ======================= Inventory =======================
+
+export function InventorySection() {
+  const { settings, save } = useSettings();
+  const { busy, run } = useAction();
+  const { draft, set, dirty } = useDraft(settings, ['quantityBuffer', 'maxListQuantity', 'minShopifyQtyToList', 'lowStockThreshold', 'restockOnCancel', 'matchUnlinkedBySku']);
+  if (!settings) return null;
+  const n = (k: string, label: string, hint: string) => (
+    <Field label={label} hint={hint}>
+      <input type="number" min={0} className="input" value={draft[k] ?? 0} onChange={(e) => set(k, Number(e.target.value))} />
+    </Field>
+  );
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {n('quantityBuffer', 'Safety buffer', 'Hide this many units from eBay to prevent overselling (5 in Shopify with buffer 1 shows 4 on eBay)')}
+        {n('maxListQuantity', 'Max quantity shown', '0 = show everything. Showing fewer can create urgency.')}
+        {n('minShopifyQtyToList', 'Minimum stock to list', 'Show 0 on eBay when Shopify has fewer than this')}
+        {n('lowStockThreshold', 'Low-stock alert at', 'Alert when Shopify stock drops to this')}
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Toggle checked={!!draft.restockOnCancel} onChange={(v) => set('restockOnCancel', v)} label="Restock on cancellation" description="When an eBay order is cancelled, add the units back to Shopify." />
+        <Toggle checked={!!draft.matchUnlinkedBySku} onChange={(v) => set('matchUnlinkedBySku', v)} label="Match other eBay sales by SKU" description="Also deduct Shopify stock for eBay sales of listings not created here, if the SKU matches." />
+      </div>
+      <Callout kind="info" title="Tip: turn on eBay's Out-of-stock control">
+        In eBay Seller Hub, go to <b>Account</b>, then <b>Site preferences</b>, then <b>Selling preferences</b>, and turn on <b>Out-of-stock control</b>. Listings that reach 0 are then hidden instead of ended, so they keep their sales history and search ranking. The app relists ended items automatically either way.
+      </Callout>
+      <Button variant="primary" disabled={!dirty} loading={busy === 'save'} onClick={() => run('save', () => save(draft), 'Saved')}>
+        Save
+      </Button>
+    </div>
+  );
+}
+
+// ======================= Sync, alerts & webhooks =======================
+
+export function SyncSection() {
+  const { settings, save } = useSettings();
+  const { busy, run } = useAction();
+  const status = useApi('/api/status');
+  const keys = ['dryRun', 'syncIntervalMin', 'ordersIntervalMin', 'researchIntervalHours', 'verifyIntervalHours', 'staleDays', 'alertWebhookUrl', 'webhookPublicUrl', 'backupKeep'];
+  const { draft, set, dirty } = useDraft(settings, keys);
+  if (!settings) return null;
+  const n = (k: string, label: string, suffix: string, hint?: string) => (
+    <Field label={label} hint={hint}>
+      <div className="relative">
+        <input type="number" min={0} className="input pr-14" value={draft[k] ?? 0} onChange={(e) => set(k, Number(e.target.value))} />
+        <span className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-zinc-400">{suffix}</span>
+      </div>
+    </Field>
+  );
+  return (
+    <div className="space-y-8">
+      <div className="space-y-4">
+        <Toggle checked={!!draft.dryRun} onChange={(v) => set('dryRun', v)} label="Dry-run mode" description="Simulate everything without changing eBay or Shopify. Great for testing; check the Activity log to see what would happen." />
+        <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
+          {n('ordersIntervalMin', 'Check eBay sales every', 'min')}
+          {n('syncIntervalMin', 'Push Shopify changes every', 'min')}
+          {n('researchIntervalHours', 'Price research every', 'hours')}
+          {n('verifyIntervalHours', 'Health check every', 'hours')}
+          {n('staleDays', 'Stale after no sales for', 'days')}
+          {n('backupKeep', 'Keep backups', 'days')}
+        </div>
+      </div>
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Phone / chat alerts</h3>
+        <Field
+          label="Alert webhook URL"
+          hint={
+            <>
+              Get alerts for oversell risks, errors and price drops. Works with a free <A href="https://ntfy.sh">ntfy.sh</A> topic (e.g. https://ntfy.sh/my-secret-topic), a Discord webhook or a Slack webhook.
+            </>
+          }
+        >
+          <input className="input" placeholder="https://ntfy.sh/your-topic" value={draft.alertWebhookUrl ?? ''} onChange={(e) => set('alertWebhookUrl', e.target.value)} />
+        </Field>
+      </div>
+      <div className="space-y-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          Instant Shopify updates <Badge color="violet">Optional</Badge>
+        </h3>
+        <p className="text-sm text-zinc-600 dark:text-zinc-300">
+          By default the app checks Shopify every few minutes. For near-instant updates, give the app a public HTTPS address, for example with a free{' '}
+          <A href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/">Cloudflare Tunnel</A>, and register webhooks. The README has a step-by-step guide.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <input className="input max-w-md" placeholder="https://sync.yourdomain.com" value={draft.webhookPublicUrl ?? ''} onChange={(e) => set('webhookPublicUrl', e.target.value)} />
+          <Button
+            loading={busy === 'hooks'}
+            disabled={!draft.webhookPublicUrl}
+            onClick={() =>
+              run(
+                'hooks',
+                async () => {
+                  const r = await post('/api/shopify/webhooks/register', { url: draft.webhookPublicUrl });
+                  status.reload();
+                  const bad = r.results.filter((x: any) => !x.ok);
+                  if (bad.length) throw new Error(bad.map((x: any) => `${x.topic}: ${x.message}`).join('; '));
+                  return r;
+                },
+                'Webhooks registered',
+              )
+            }
+          >
+            Register webhooks
+          </Button>
+        </div>
+      </div>
+      <Button variant="primary" disabled={!dirty} loading={busy === 'save'} onClick={() => run('save', () => save(draft), 'Saved')}>
+        Save
+      </Button>
+    </div>
+  );
+}
+
+// ======================= Listing templates =======================
+
+export function TemplatesSection() {
+  const { settings, save } = useSettings();
+  const { busy, run } = useAction();
+  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate']);
+  if (!settings) return null;
+  return (
+    <div className="space-y-5">
+      <Field label="Title template" hint="Placeholders: {brand} {title} {options} {type} {sku}. Titles are trimmed to eBay's 80-character limit on a word boundary.">
+        <input className="input font-mono" value={draft.titleTemplate ?? ''} onChange={(e) => set('titleTemplate', e.target.value)} />
+      </Field>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field label="Description template (HTML)" hint="Placeholders: {{title}} {{description}}. Scripts and iframes are removed automatically because eBay blocks active content.">
+          <textarea rows={16} className="input font-mono text-xs" value={draft.descriptionTemplate ?? ''} onChange={(e) => set('descriptionTemplate', e.target.value)} />
+        </Field>
+        <div>
+          <span className="label">Preview</span>
+          <iframe
+            title="preview"
+            sandbox=""
+            className="h-[340px] w-full rounded-xl border border-zinc-200 bg-white dark:border-white/10"
+            srcDoc={(draft.descriptionTemplate ?? '').replace(/\{\{\s*title\s*\}\}/g, 'Sample Product Title').replace(/\{\{\s*description\s*\}\}/g, '<p>Your Shopify product description appears here.</p>')}
+          />
+        </div>
+      </div>
+      <Button variant="primary" disabled={!dirty} loading={busy === 'save'} onClick={() => run('save', () => save(draft), 'Templates saved')}>
+        Save templates
+      </Button>
+    </div>
+  );
+}
+
+// ======================= Security =======================
+
+export function SecuritySection() {
+  const { busy, run } = useAction();
+  const [form, setForm] = useState({ current: '', password: '' });
+  return (
+    <div className="max-w-sm space-y-4">
+      <Field label="Current password">
+        <input type="password" className="input" value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} />
+      </Field>
+      <Field label="New password" hint="At least 8 characters">
+        <input type="password" className="input" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+      </Field>
+      <Button variant="primary" loading={busy === 'pw'} onClick={() => run('pw', () => post('/api/password', form).then(() => setForm({ current: '', password: '' })), 'Password changed')}>
+        Change password
+      </Button>
+    </div>
+  );
+}

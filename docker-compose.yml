@@ -1,0 +1,32 @@
+# Shopify <-> eBay Sync
+#
+# 1. Put this file in a folder, e.g. /volume1/docker/shopify-ebay-sync (Synology)
+# 2. Start it:   docker compose up -d        (or: Container Manager > Project > Create)
+# 3. Open        http://<your-server-ip>:8080  and follow the setup wizard
+#
+# Everything (keys, password, listings) is configured in the browser and stored in ./data.
+services:
+  shopify-ebay-sync:
+    image: ghcr.io/OWNER/shopify-ebay-sync:latest
+    # To build from source instead of pulling the image, comment out "image" above and uncomment:
+    # build: .
+    container_name: shopify-ebay-sync
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      # Owner of ./data on the host. Synology DSM users are usually 1026:100 (SSH in and run `id` to check).
+      - PUID=1000
+      - PGID=1000
+      - TZ=America/New_York
+      # Optional: the address you use to reach the app (enables automatic eBay sign-in redirects over HTTPS)
+      # - PUBLIC_URL=https://sync.example.com
+      # - COOKIE_SECURE=true
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
