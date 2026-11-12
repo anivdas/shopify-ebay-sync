@@ -678,7 +678,16 @@ export async function publishListing(id: number, opts: { skipValidation?: boolea
   } catch (e) {
     const message = (e as Error).message;
     run(`UPDATE ebay_listings SET status = CASE WHEN ebay_listing_id IS NULL THEN 'error' ELSE status END, last_error = ?, updated_at = ? WHERE id = ?`, message, nowIso(), id);
-    logActivity('error', 'listing.publish', `Publishing "${listing.title}" failed: ${message}`, { id });
+    const pkg = listingPackage(listing);
+    logActivity('error', 'listing.publish', `Publishing "${listing.title}" failed: ${message}`, {
+      id,
+      ebayErrors: e instanceof ebay.EbayError ? e.errors.map(({ errorId, message: m, parameters }) => ({ errorId, message: m, parameters })) : undefined,
+      sent: getItems(id).map((i) => ({ sku: i.sku, package: pkg.item(i).package, mpn: i.mpn || undefined })),
+      policies: {
+        fulfillment: listing.fulfillment_policy_id || getSettings().fulfillmentPolicyId,
+        location: listing.merchant_location_key || getSettings().merchantLocationKey,
+      },
+    });
     throw e;
   }
   return getListing(id)!;
