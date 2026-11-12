@@ -64,7 +64,7 @@ Everything is free. You create your *own* free API keys for Shopify and eBay. eB
 
 1. In **Package Center**, install **Container Manager**.
 2. In **File Station**, create the folder `docker/shopify-ebay-sync`.
-3. Download [`docker-compose.yml`](docker-compose.yml) into that folder.
+3. Download [`docker-compose.yml`](https://raw.githubusercontent.com/anivdas/shopify-ebay-sync/main/docker-compose.yml) into that folder.
    - Change `PUID`/`PGID` to your DSM user's IDs (usually `1026` and `100`). You can check by SSHing in and running `id`.
    - Set `TZ` to your timezone.
 4. Open **Container Manager**, go to **Project**, then **Create**:
@@ -78,7 +78,7 @@ Everything is free. You create your *own* free API keys for Shopify and eBay. eB
 
 ```bash
 mkdir shopify-ebay-sync && cd shopify-ebay-sync
-curl -O https://raw.githubusercontent.com/OWNER/shopify-ebay-sync/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/anivdas/shopify-ebay-sync/main/docker-compose.yml
 docker compose up -d
 ```
 
@@ -91,7 +91,7 @@ The image is built for both `amd64` and `arm64`, so it runs on Intel/AMD machine
 Requires Node.js 24+.
 
 ```bash
-git clone https://github.com/OWNER/shopify-ebay-sync.git && cd shopify-ebay-sync
+git clone https://github.com/anivdas/shopify-ebay-sync.git && cd shopify-ebay-sync
 npm ci && npm run build
 npm start          # http://localhost:8080
 ```

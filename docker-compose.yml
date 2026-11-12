@@ -7,7 +7,7 @@
 # Everything (keys, password, listings) is configured in the browser and stored in ./data.
 services:
   shopify-ebay-sync:
-    image: ghcr.io/OWNER/shopify-ebay-sync:latest
+    image: ghcr.io/anivdas/shopify-ebay-sync:latest
     # To build from source instead of pulling the image, comment out "image" above and uncomment:
     # build: .
     container_name: shopify-ebay-sync
