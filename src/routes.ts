@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { runAutoList } from './autolist.ts';
 import * as catalog from './catalog.ts';
 import { eligibility, listOverrides, setOverride } from './rules.ts';
-import { smartTitle } from './listing-builder.ts';
+import { inferFormat, inferMovieTitle, smartTitle } from './listing-builder.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
 import { all, get, getSettings, getState, json, run, setState, updateSettings } from './db.ts';
@@ -198,6 +198,20 @@ router.post('/api/ebay/locations', async ({ body }) => {
   updateSettings({ merchantLocationKey: key });
   return { key };
 });
+router.put('/api/ebay/locations', async ({ body }) => {
+  const key = String(body?.key);
+  if (!key) throw new Error('Location key is required');
+  await ebay.updateLocation(key, { name: body?.name, postalCode: body?.postalCode, country: body?.country || ebayConf().country, city: body?.city, stateOrProvince: body?.stateOrProvince });
+  return { key };
+});
+router.delete('/api/ebay/locations', async ({ body }) => {
+  const key = String(body?.key);
+  if (!key) throw new Error('Location key is required');
+  await ebay.deleteLocation(key);
+  const s = getSettings();
+  if (s.merchantLocationKey === key) updateSettings({ merchantLocationKey: '' });
+  return { key });
+});
 router.get('/api/ebay/categories', async ({ query }) => ({ categories: await ebay.suggestCategories(query.get('q') ?? '') }));
 router.get('/api/ebay/aspects', async ({ query }) => ({ aspects: await ebay.getAspects(query.get('categoryId') ?? '') }));
 
@@ -255,6 +269,15 @@ router.post('/api/products/:id/override', async ({ params, body }) => {
 });
 
 router.post('/api/tools/title-preview', ({ body }) => smartTitle(String(body?.title ?? '')));
+
+router.post('/api/tools/infer-item-specifics', ({ body }) => {
+  const title = String(body?.title ?? '');
+  const brand = body?.brand ? String(body.brand) : null;
+  return {
+    format: inferFormat(title),
+    movieTitle: inferMovieTitle(title, brand),
+  };
+});
 
 router.post('/api/alerts/test', async () => {
   if (!getSettings().alertWebhookUrl) throw new HttpError(400, 'Enter and save an alert webhook URL first');

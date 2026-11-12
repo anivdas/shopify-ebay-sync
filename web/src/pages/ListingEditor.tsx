@@ -444,6 +444,7 @@ function CategoryPicker({ value, defaultQuery, onChange }: { value: { id: string
 function AspectsEditor({ categoryId, aspects, variesBy, items, kind, onChange, onVariesBy }: { categoryId: string; aspects: Record<string, string[]>; variesBy: string[]; items: any[]; kind: string; onChange: (a: Record<string, string[]>) => void; onVariesBy: (v: string[]) => void }) {
   const { data, loading, error } = useApi<{ aspects: Aspect[] }>(`/api/ebay/aspects?categoryId=${categoryId}`);
   const [showAll, setShowAll] = useState(false);
+  const [autoFilling, setAutoFilling] = useState(false);
   const optionNames = [...new Set(items.flatMap((i) => Object.keys(i.options)))];
   const defs = data?.aspects ?? [];
   const known = new Set(defs.map((d) => d.name));
@@ -458,14 +459,40 @@ function AspectsEditor({ categoryId, aspects, variesBy, items, kind, onChange, o
   };
   const coveredByVariant = (name: string) => kind === 'group' ? variesBy.includes(name) : items.every((i) => i.options[name]);
 
+  const autoFill = async () => {
+    setAutoFilling(true);
+    try {
+      const productTitle = items[0]?.title || '';
+      const brand = aspects['Brand']?.[0] || null;
+      const inferred = await post('/api/tools/infer-item-specifics', { title: productTitle, brand });
+      const next = { ...aspects };
+      if (inferred.format && !aspects['Format']?.length) {
+        next['Format'] = [inferred.format];
+      }
+      if (inferred.movieTitle && !aspects['Movie/TV Title']?.length) {
+        next['Movie/TV Title'] = [inferred.movieTitle];
+      }
+      onChange(next);
+    } catch (e) {
+      console.error('Auto-fill failed', e);
+    } finally {
+      setAutoFilling(false);
+    }
+  };
+
   return (
     <Card
       title="Item specifics"
       description="Required ones must be filled in. Recommended ones help buyers find you in search filters."
       actions={
-        <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setShowAll(!showAll)}>
-          {showAll ? 'Show fewer' : `Show all (${defs.length})`}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" className="px-2 py-1 text-xs" loading={autoFilling} onClick={autoFill}>
+            Auto-fill from title
+          </Button>
+          <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setShowAll(!showAll)}>
+            {showAll ? 'Show fewer' : `Show all (${defs.length})`}
+          </Button>
+        </div>
       }
     >
       {kind === 'group' && (

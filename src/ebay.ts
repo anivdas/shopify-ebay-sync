@@ -181,6 +181,18 @@ export const createLocation = (key: string, loc: { name: string; postalCode: str
     },
   });
 
+export const updateLocation = (key: string, loc: { name: string; postalCode: string; country: string; city?: string; stateOrProvince?: string }) =>
+  ebay('PUT', `/sell/inventory/v1/location/${encodeURIComponent(key)}`, {
+    body: {
+      name: loc.name,
+      merchantLocationStatus: 'ENABLED',
+      locationTypes: ['WAREHOUSE'],
+      location: { address: { postalCode: loc.postalCode, country: loc.country, city: loc.city, stateOrProvince: loc.stateOrProvince } },
+    },
+  });
+
+export const deleteLocation = (key: string) => ebay('DELETE', `/sell/inventory/v1/location/${encodeURIComponent(key)}`);
+
 // ---------- Taxonomy ----------
 let treeId: string | null = null;
 async function categoryTreeId() {

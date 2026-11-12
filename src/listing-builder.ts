@@ -118,6 +118,38 @@ export function sanitizeHtml(html: string): string {
 export const stripHtml = (html: string) =>
   collapse((html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&'));
 
+/** Infers eBay Format from a product title. Returns null if unclear. */
+export function inferFormat(title: string): string | null {
+  const t = title.toLowerCase();
+  if (t.includes('4k') || t.includes('ultra hd')) return '4K UHD';
+  if (t.includes('blu-ray') || t.includes('blu ray')) return 'Blu-ray';
+  if (t.includes('dvd')) return 'DVD';
+  return null;
+}
+
+/** Infers Movie/TV Title by removing format, edition, and vendor keywords. */
+export function inferMovieTitle(title: string, brand?: string | null): string {
+  let t = title;
+  // Remove brand/vendor if present at start or end
+  if (brand) {
+    const brandLower = brand.toLowerCase();
+    t = t.replace(new RegExp(`^${escapeRegex(brand)}\\s*[:\\-|]?\\s*`, 'i'), '');
+    t = t.replace(new RegExp(`\\s*[:\\-|]?\\s*${escapeRegex(brand)}$`, 'i'), '');
+  }
+  // Remove format keywords
+  t = t.replace(/\b(4K|4K UHD|Ultra HD|UHD|Blu-?ray|DVD|HD|SD)\b/gi, '');
+  // Remove edition/collection keywords
+  t = t.replace(/\b(Steelbook|Limited Edition|Collector'?s Edition|Special Edition|Deluxe Edition|Anniversary Edition|Director'?s Cut|Extended Cut|Theatrical Cut|Collection|Box Set)\b/gi, '');
+  // Remove common suffixes
+  t = t.replace(/\s*[:\-|]\s*$/, '');
+  t = t.replace(/\s+\(.*?\)\s*$/, '');
+  return collapse(t);
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /**

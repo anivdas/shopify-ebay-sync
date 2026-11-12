@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cleanAspects, ebayQuantity, ebaySku, gtinFields, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
+import { cleanAspects, ebayQuantity, ebaySku, gtinFields, inferFormat, inferMovieTitle, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
 
 test('title template dedupes brand and limits to 80 chars', () => {
   assert.equal(renderTitle('{brand} {title} {options}', { brand: 'Sony', title: 'Sony WH-1000XM5 Headphones', options: 'Black' }), 'Sony WH-1000XM5 Headphones Black');
@@ -87,4 +87,18 @@ test('ebaySku falls back for missing/long skus', () => {
 
 test('cleanAspects normalizes', () => {
   assert.deepEqual(cleanAspects({ Brand: 'Sony', Color: ['Black', 'Black', ''], Empty: '' }), { Brand: ['Sony'], Color: ['Black'] });
+});
+
+test('inferFormat detects format from title', () => {
+  assert.equal(inferFormat('Blade Runner 4K Ultra HD Blu-ray'), '4K UHD');
+  assert.equal(inferFormat('Movie Blu-ray Steelbook'), 'Blu-ray');
+  assert.equal(inferFormat('Movie DVD'), 'DVD');
+  assert.equal(inferFormat('Movie'), null);
+});
+
+test('inferMovieTitle extracts movie name', () => {
+  assert.equal(inferMovieTitle('Blade Runner 4K Ultra HD Blu-ray Steelbook'), 'Blade Runner');
+  assert.equal(inferMovieTitle('The Matrix 4K UHD Limited Edition Steelbook', 'Warner'), 'The Matrix');
+  assert.equal(inferMovieTitle('HDzeta Blade Runner 2049 Steelbook', 'HDzeta'), 'Blade Runner 2049');
+  assert.equal(inferMovieTitle('Inception Blu-ray'), 'Inception');
 });
