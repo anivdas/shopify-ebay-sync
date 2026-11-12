@@ -185,9 +185,10 @@ export function renderDescription(template: string, vars: { title: string; descr
   // {{x}} is the documented form; {x} is accepted too so a single-brace template still works.
   const ph = (name: string) => new RegExp(`\\{\\{\\s*${name}\\s*\\}\\}|\\{\\s*${name}\\s*\\}`, 'g');
   let tpl = template || '{{description}}';
-  if (vars.showFullTitle !== false && !ph('full_title').test(tpl)) tpl = `<p><b>This listing is for:</b> {{full_title}}</p>\n${tpl}`;
+  if (vars.showFullTitle !== false && !ph('full_title').test(tpl)) tpl = `<p>This listing is for: {{full_title}}</p>\n${tpl}`;
   const description = vars.keepFormatting ? normalizeStyles(sanitizeHtml(vars.description)) : cleanDescription(vars.description);
-  const body = tpl
+  const plainTpl = vars.keepFormatting ? tpl : stripTemplateFormatting(tpl);
+  const body = plainTpl
     .replace(/font-family\s*:[^;"']*;?/gi, '')
     .replace(/\sstyle\s*=\s*(["'])\s*\1/gi, '')
     .replace(ph('full_title'), full)
@@ -196,8 +197,17 @@ export function renderDescription(template: string, vars: { title: string; descr
   return sanitizeHtml(`<div style="${DESCRIPTION_STYLE}">\n${body}\n</div>`);
 }
 
+/** Plain mode: no styles, colors, bold/italics, rules or headings in the template (headings become paragraphs). */
+function stripTemplateFormatting(tpl: string): string {
+  return tpl
+    .replace(/\s(style|class|color|bgcolor|face|size|align)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/<\/?(b|strong|i|em|u|font|span|small|big|mark|center)\b[^>]*>/gi, '')
+    .replace(/<hr\b[^>]*>/gi, '')
+    .replace(/<(\/?)h[1-6]\b[^>]*>/gi, '<$1p>');
+}
+
 /** One font for every listing; set on a wrapper so template and Shopify content look the same. */
-export const DESCRIPTION_STYLE = 'font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;max-width:900px;margin:0 auto';
+export const DESCRIPTION_STYLE = 'font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5';
 
 const decodeEntities = (s: string) =>
   s

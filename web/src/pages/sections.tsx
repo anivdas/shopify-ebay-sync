@@ -1051,7 +1051,7 @@ export function TemplatesSection() {
         checked={!!draft.keepDescriptionFormatting}
         onChange={(v) => set('keepDescriptionFormatting', v)}
         label="Keep formatting from Shopify descriptions"
-        description="Off (recommended): every description is rebuilt as plain paragraphs and bullet points in one font, so all listings look the same. Lines starting with * or - become bullets. On: keeps bold, links and layout, but still removes fonts and colors."
+        description="Off (recommended): completely plain descriptions in one font: no colors, bold, boxes, lines or headings, from Shopify or the template. Lines starting with * or - become bullets. On: keeps bold, links and the template's styling, but still removes Shopify fonts and colors."
       />
       <div className="grid gap-4 lg:grid-cols-2">
         <div>

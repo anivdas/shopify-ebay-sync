@@ -311,11 +311,10 @@ export const defaultSettings = {
   autoPublish: true,
   // [{ field, value, profileId }] - first match wins
   profileRules: '[]',
-  descriptionTemplate: `<p style="background:#eef7ee;padding:8px 12px;border-radius:6px"><b>Condition:</b> Brand new.</p>
+  descriptionTemplate: `<p>Condition: Brand new.</p>
 {{description}}
-<hr style="margin:20px 0;border:none;border-top:1px solid #ddd">
-<p style="font-size:16px;margin:0 0 4px"><b>Shipping</b></p><p>Ships fast with tracking on every order.</p>
-<p style="font-size:16px;margin:0 0 4px"><b>Returns</b></p><p>See the returns section of this listing for details.</p>`,
+<p>Shipping: Ships fast with tracking on every order.</p>
+<p>Returns: See the returns section of this listing for details.</p>`,
   // alerts
   alertWebhookUrl: '',
   lowStockThreshold: 1,
@@ -323,9 +322,27 @@ export const defaultSettings = {
 
 export type Settings = typeof defaultSettings;
 
+/** Earlier built-in description templates; a saved copy of one of these follows the current default. */
+const OLD_DESCRIPTION_TEMPLATES = [
+  `<div style="font-family:Arial,Helvetica,sans-serif;max-width:900px;margin:0 auto;color:#222;line-height:1.5">
+  <h2 style="margin:0 0 12px">{{title}}</h2>
+  <p style="background:#eef7ee;padding:8px 12px;border-radius:6px"><b>Condition:</b> Brand new.</p>
+  <div>{{description}}</div>
+  <hr style="margin:20px 0;border:none;border-top:1px solid #ddd">
+  <h3>Shipping</h3><p>Ships fast with tracking on every order.</p>
+  <h3>Returns</h3><p>See the returns section of this listing for details.</p>
+</div>`,
+  `<p style="background:#eef7ee;padding:8px 12px;border-radius:6px"><b>Condition:</b> Brand new.</p>
+{{description}}
+<hr style="margin:20px 0;border:none;border-top:1px solid #ddd">
+<p style="font-size:16px;margin:0 0 4px"><b>Shipping</b></p><p>Ships fast with tracking on every order.</p>
+<p style="font-size:16px;margin:0 0 4px"><b>Returns</b></p><p>See the returns section of this listing for details.</p>`,
+].map((t) => t.replace(/\s+/g, ' ').trim());
+
 export function getSettings(): Settings {
   const rows = all<{ key: string; value: string }>(`SELECT key, value FROM settings WHERE key NOT LIKE 'state:%'`);
   const stored = Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)]));
+  if (typeof stored.descriptionTemplate === 'string' && OLD_DESCRIPTION_TEMPLATES.includes(stored.descriptionTemplate.replace(/\s+/g, ' ').trim())) delete stored.descriptionTemplate;
   return { ...defaultSettings, ...stored };
 }
 

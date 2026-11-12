@@ -29,14 +29,14 @@ const unwrap = (html: string) => html.replace(new RegExp(`^<div style="${DESCRIP
 test('renderDescription escapes title and inserts description in one consistent wrapper', () => {
   const out = renderDescription('<h1>{{title}}</h1>{{description}}', { title: 'A<B', description: '<b>x</b>', showFullTitle: false });
   assert.ok(out.startsWith(`<div style="${DESCRIPTION_STYLE}">`));
-  assert.equal(unwrap(out), '<h1>A&lt;B</h1><p>x</p>');
+  assert.equal(unwrap(out), '<p>A&lt;B</p><p>x</p>');
 });
 
 test('renderDescription adds the full Shopify name on top (inside the wrapper) unless the template places it', () => {
   const out = unwrap(renderDescription('{{description}}', { title: 'Movie', fullTitle: 'Movie 4K Steelbook - Region Free', description: '<p>d</p>' }));
-  assert.match(out, /^<p[^>]*><b>This listing is for:<\/b> Movie 4K Steelbook - Region Free<\/p>/);
+  assert.match(out, /^<p>This listing is for: Movie 4K Steelbook - Region Free<\/p>/);
   const placed = unwrap(renderDescription('<h2>{{full_title}}</h2>{{description}}', { title: 'Movie', fullTitle: 'Movie Full', description: '' }));
-  assert.equal(placed, '<h2>Movie Full</h2>');
+  assert.equal(placed, '<p>Movie Full</p>');
 });
 
 test('cleanDescription strips all formatting into plain paragraphs and bullets', () => {
@@ -49,8 +49,8 @@ test('cleanDescription strips all formatting into plain paragraphs and bullets',
 });
 
 test('renderDescription cleans the Shopify description by default and accepts {single} braces', () => {
-  const out = unwrap(renderDescription('<div style="font-family:Times">{title}</div>{description}', { title: 'Movie', description: '<p style="color:red">Hello</p>', showFullTitle: false }));
-  assert.equal(out, '<div>Movie</div><p>Hello</p>');
+  const out = unwrap(renderDescription('<div style="font-family:Times">{title}</div><h3 style="color:red"><b>Ship</b></h3><hr>{description}', { title: 'Movie', description: '<p style="color:red">Hello</p>', showFullTitle: false }));
+  assert.equal(out, '<div>Movie</div><p>Ship</p><p>Hello</p>');
   const kept = unwrap(renderDescription('{{description}}', { title: 'M', description: '<p><b>Hi</b></p>', showFullTitle: false, keepFormatting: true }));
   assert.equal(kept, '<p><b>Hi</b></p>');
 });
