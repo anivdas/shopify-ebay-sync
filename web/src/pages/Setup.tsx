@@ -111,8 +111,24 @@ function Extras({ status }: { status: any }) {
           Sold-price data (last 6 weeks) {insights ? <Badge color="green">Enabled</Badge> : <Badge color="amber">Needs eBay approval</Badge>}
         </h3>
         <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          Prices of active listings work out of the box. Prices of <b>sold</b> items come from eBay's <i>Marketplace Insights API</i>, which eBay only gives to approved apps. To request it, sign in at developer.ebay.com, open your app's keyset and request access to the Marketplace Insights API through the Application Growth Check. Once approved, click <b>Test</b> under Settings, Connections. The app picks it up automatically.
+          Prices of active listings work out of the box. Prices of <b>sold</b> items come from eBay's <i>Marketplace Insights API</i>, a limited-release API that eBay grants case by case. Approval isn't guaranteed and can take weeks. Everything else works without it.
         </p>
+        {!insights && (
+          <ol className="list-decimal space-y-1.5 pl-5 text-sm text-zinc-600 marker:font-semibold marker:text-brand-500 dark:text-zinc-300">
+            <li>
+              Sign in at developer.ebay.com and open{' '}
+              <a className="font-medium text-brand-600 hover:underline dark:text-brand-400" href="https://developer.ebay.com/my/support/tickets?tab=app-check" target="_blank" rel="noreferrer">
+                Application Growth Check
+              </a>{' '}
+              (Support, then Tickets, then Application Growth Check).
+            </li>
+            <li>Start a new request for your <b>Production</b> keyset and choose access to a restricted API: <b>Buy, Marketplace Insights API</b>.</li>
+            <li>
+              Describe your use case. You can adapt: <i>"I'm an eBay seller (store subscriber). My self-hosted tool reads 90-day sold prices of identical brand-new items (by UPC) to price my own listings competitively. Data is only shown to me, not redistributed or resold, and only aggregated prices are stored."</i>
+            </li>
+            <li>Submit. eBay replies by email or in that ticket. Once approved, open Settings, Connections and click <b>Test</b> under eBay; sold prices then appear automatically.</li>
+          </ol>
+        )}
       </div>
       <SyncSection />
       <div className="rounded-2xl bg-gradient-to-br from-emerald-500/10 to-brand-500/5 p-6 text-center ring-1 ring-emerald-500/20">

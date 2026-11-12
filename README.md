@@ -161,7 +161,11 @@ eBay price = target, kept between floor and ceiling (rounded to .99 when it fits
 
 **Exact matching:** add **UPC/EAN barcodes** to your Shopify variants. Without a barcode, the app matches by brand, title and model numbers, which is less exact. You can review the matched listings in the market panel.
 
-**Sold prices (last 6 weeks)** come from eBay's *Marketplace Insights API*, which eBay only gives to approved apps. To request it, sign in at developer.ebay.com and request access through the **Application Growth Check** for your keyset. Until it's approved, everything else works and research uses active listings only.
+**Sold prices (last 6 weeks)** come from eBay's *Marketplace Insights API*, a limited-release API that eBay approves case by case. Approval isn't guaranteed and can take weeks. Until it's approved, everything else works and research uses active listings only. To request it:
+1. Sign in at developer.ebay.com and open [Application Growth Check](https://developer.ebay.com/my/support/tickets?tab=app-check) (Support → Tickets).
+2. Start a request for your **Production** keyset asking for access to the restricted **Buy → Marketplace Insights API**.
+3. Describe your use case, for example: *"I'm an eBay seller. My self-hosted tool reads 90-day sold prices of identical brand-new items (by UPC) to price my own listings. Data is only shown to me, not redistributed, and only aggregated prices are stored."*
+4. Once approved, click **Test** under Settings → Connections → eBay; sold prices then appear automatically.
 
 ---
 
