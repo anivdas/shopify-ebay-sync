@@ -1,6 +1,6 @@
-import { CheckCircle2, ExternalLink, KeyRound, Plug, RefreshCw, Unplug } from 'lucide-react';
+import { CheckCircle2, ExternalLink, KeyRound, Pencil, Plug, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, post, put, useApi } from '../api.ts';
+import { api, del, post, put, useApi } from '../api.ts';
 import { Badge, Button, Callout, CopyField, Field, Toggle, useAction, useConfirm } from '../ui.tsx';
 
 export type Settings = Record<string, any>;
@@ -310,16 +310,20 @@ export function EbayConnectSection({ onSaved }: { onSaved?: () => void }) {
 // ======================= Business policies & location =======================
 
 export function PoliciesSection({ onSaved }: { onSaved?: () => void }) {
-  const { settings, save } = useSettings();
+  const { settings, save, reload } = useSettings();
   const status = useApi('/api/status');
   const policies = useApi(status.data?.ebay?.connected ? '/api/ebay/policies' : null);
   const locations = useApi(status.data?.ebay?.connected ? '/api/ebay/locations' : null);
   const shopLocations = useApi(status.data?.shopify?.test?.ok ? '/api/shopify/locations' : null);
   const { busy, run } = useAction();
   const { draft, set, dirty } = useDraft(settings, ['fulfillmentPolicyId', 'paymentPolicyId', 'returnPolicyId', 'merchantLocationKey', 'shopifyLocationId']);
-  const [newLoc, setNewLoc] = useState({ name: 'Main warehouse', postalCode: '', city: '', stateOrProvince: '' });
-  const [editingLoc, setEditingLoc] = useState<string | null>(null);
-  const [editLocData, setEditLocData] = useState({ name: '', postalCode: '', city: '', stateOrProvince: '' });
+  const confirm = useConfirm();
+  const emptyLoc = { name: 'Main warehouse', postalCode: '', city: '', stateOrProvince: '' };
+  /** null = closed, 'new' = creating, otherwise the merchantLocationKey being edited */
+  const [locMode, setLocMode] = useState<string | null>(null);
+  const [locData, setLocData] = useState(emptyLoc);
+  const locList: any[] = locations.data?.locations ?? [];
+  const country = status.data?.ebay?.country ?? 'US';
 
   if (!status.data?.ebay?.connected) return <Callout kind="warn">Connect your eBay account first.</Callout>;
   const optedOut = status.data.ebay.test?.policiesOptIn === false;
@@ -386,111 +390,100 @@ export function PoliciesSection({ onSaved }: { onSaved?: () => void }) {
             </select>
           </Field>
         </div>
-        {locations.data && !locations.data.locations.length && (
-          <div className="mt-4 grid gap-3 rounded-xl border border-dashed border-zinc-300 p-4 sm:grid-cols-5 dark:border-white/15">
-            <input className="input sm:col-span-2" placeholder="Name" value={newLoc.name} onChange={(e) => setNewLoc({ ...newLoc, name: e.target.value })} />
-            <input className="input" placeholder="ZIP / postal code" value={newLoc.postalCode} onChange={(e) => setNewLoc({ ...newLoc, postalCode: e.target.value })} />
-            <input className="input" placeholder="City" value={newLoc.city} onChange={(e) => setNewLoc({ ...newLoc, city: e.target.value })} />
-            <input className="input" placeholder="State" value={newLoc.stateOrProvince} onChange={(e) => setNewLoc({ ...newLoc, stateOrProvince: e.target.value })} />
-            <Button
-              className="sm:col-span-5 sm:justify-self-start"
-              loading={busy === 'loc'}
-              disabled={!newLoc.postalCode}
-              onClick={() =>
-                run(
-                  'loc',
-                  async () => {
-                    const r = await post('/api/ebay/locations', newLoc);
-                    set('merchantLocationKey', r.key);
-                    locations.reload();
-                  },
-                  'Location created',
-                )
-              }
-            >
-              Create location
-            </Button>
-          </div>
-        )}
-        {locations.data && locations.data.locations.length > 0 && (
+        {!!locList.length && (
           <div className="mt-4 space-y-2">
-            <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Manage locations</h4>
-            {locations.data.locations.map((l: any) => (
-              <div key={l.merchantLocationKey} className="flex items-center justify-between rounded-lg border border-zinc-200 p-3 dark:border-white/10">
-                <div>
-                  <div className="font-medium">{l.name ?? l.merchantLocationKey}</div>
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    {l.location?.address?.city && `${l.location.address.city}, `}
-                    {l.location?.address?.stateOrProvince && `${l.location.address.stateOrProvince} `}
-                    {l.location?.address?.postalCode && `(${l.location.address.postalCode})`}
+            {locList.map((l: any) => {
+              const a = l.location?.address ?? {};
+              return (
+                <div key={l.merchantLocationKey} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 px-4 py-3 dark:border-white/10">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {l.name ?? l.merchantLocationKey}
+                      {draft.merchantLocationKey === l.merchantLocationKey && <Badge color="green">Default</Badge>}
+                    </div>
+                    <div className="text-xs text-zinc-500">{[a.city, [a.stateOrProvince, a.postalCode].filter(Boolean).join(' '), a.country].filter(Boolean).join(', ')}</div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() => {
+                        setLocMode(l.merchantLocationKey);
+                        setLocData({ name: l.name ?? '', postalCode: a.postalCode ?? '', city: a.city ?? '', stateOrProvince: a.stateOrProvince ?? '' });
+                      }}
+                    >
+                      <Pencil className="size-3.5" /> Edit
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs text-rose-600 dark:text-rose-400"
+                      loading={busy === `del-${l.merchantLocationKey}`}
+                      onClick={async () => {
+                        if (!(await confirm({ title: `Delete "${l.name ?? l.merchantLocationKey}"?`, body: 'The location is removed from your eBay account. Locations used by published listings can only be edited.', confirm: 'Delete', danger: true }))) return;
+                        run(
+                          `del-${l.merchantLocationKey}`,
+                          async () => {
+                            await del(`/api/ebay/locations/${encodeURIComponent(l.merchantLocationKey)}`);
+                            if (locMode === l.merchantLocationKey) setLocMode(null);
+                            locations.reload();
+                            reload();
+                          },
+                          'Location deleted',
+                        );
+                      }}
+                    >
+                      <Trash2 className="size-3.5" /> Delete
+                    </Button>
                   </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    loading={busy === `edit-${l.merchantLocationKey}`}
-                    onClick={() => {
-                      setEditingLoc(l.merchantLocationKey);
-                      setEditLocData({
-                        name: l.name ?? '',
-                        postalCode: l.location?.address?.postalCode ?? '',
-                        city: l.location?.address?.city ?? '',
-                        stateOrProvince: l.location?.address?.stateOrProvince ?? '',
-                      });
-                    }}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    loading={busy === `del-${l.merchantLocationKey}`}
-                    onClick={() =>
-                      run(
-                        `del-${l.merchantLocationKey}`,
-                        async () => {
-                          await del('/api/ebay/locations', { key: l.merchantLocationKey });
-                          locations.reload();
-                        },
-                        'Location deleted',
-                      )
-                    }
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
+            {!locMode && (
+              <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => (setLocMode('new'), setLocData({ ...emptyLoc, name: '' }))}>
+                <Plus className="size-3.5" /> Add location
+              </Button>
+            )}
           </div>
         )}
-        {editingLoc && (
-          <div className="mt-4 grid gap-3 rounded-xl border border-zinc-300 p-4 sm:grid-cols-5 dark:border-white/15">
-            <input className="input sm:col-span-2" placeholder="Name" value={editLocData.name} onChange={(e) => setEditLocData({ ...editLocData, name: e.target.value })} />
-            <input className="input" placeholder="ZIP / postal code" value={editLocData.postalCode} onChange={(e) => setEditLocData({ ...editLocData, postalCode: e.target.value })} />
-            <input className="input" placeholder="City" value={editLocData.city} onChange={(e) => setEditLocData({ ...editLocData, city: e.target.value })} />
-            <input className="input" placeholder="State" value={editLocData.stateOrProvince} onChange={(e) => setEditLocData({ ...editLocData, stateOrProvince: e.target.value })} />
-            <div className="flex gap-2 sm:col-span-5">
+        {(locMode || (locations.data && !locList.length)) && (
+          <div className="mt-4 rounded-xl border border-dashed border-zinc-300 p-4 dark:border-white/15">
+            <div className="mb-3 text-xs font-semibold text-zinc-500">{locMode && locMode !== 'new' ? 'Edit location' : 'New location'}</div>
+            <div className="grid gap-3 sm:grid-cols-5">
+              <input className="input sm:col-span-2" placeholder="Name" value={locData.name} onChange={(e) => setLocData({ ...locData, name: e.target.value })} />
+              <input className="input" placeholder="ZIP / postal code" value={locData.postalCode} onChange={(e) => setLocData({ ...locData, postalCode: e.target.value })} />
+              <input className="input" placeholder="City" value={locData.city} onChange={(e) => setLocData({ ...locData, city: e.target.value })} />
+              <input className="input" placeholder="State (e.g. TX)" maxLength={country === 'US' ? 2 : undefined} value={locData.stateOrProvince} onChange={(e) => setLocData({ ...locData, stateOrProvince: country === 'US' ? e.target.value.toUpperCase() : e.target.value })} />
+            </div>
+            <div className="mt-3 flex gap-2">
               <Button
-                loading={busy === 'update-loc'}
-                disabled={!editLocData.postalCode}
+                variant="primary"
+                loading={busy === 'loc'}
+                disabled={!locData.postalCode}
                 onClick={() =>
                   run(
-                    'update-loc',
+                    'loc',
                     async () => {
-                      await put('/api/ebay/locations', { key: editingLoc, ...editLocData });
-                      setEditingLoc(null);
+                      if (locMode && locMode !== 'new') await put(`/api/ebay/locations/${encodeURIComponent(locMode)}`, locData);
+                      else {
+                        const key = `${locData.name || 'location'}-${locData.postalCode}`.toLowerCase().replace(/[^\w-]+/g, '-');
+                        const r = await post('/api/ebay/locations', { ...locData, key });
+                        set('merchantLocationKey', r.key);
+                        reload();
+                      }
+                      setLocMode(null);
                       locations.reload();
                     },
-                    'Location updated',
+                    locMode && locMode !== 'new' ? 'Location updated' : 'Location created and set as default',
                   )
                 }
               >
-                Save
+                {locMode && locMode !== 'new' ? 'Save location' : 'Create location'}
               </Button>
-              <Button variant="ghost" onClick={() => setEditingLoc(null)}>
-                Cancel
-              </Button>
+              {locMode && (
+                <Button variant="ghost" onClick={() => setLocMode(null)}>
+                  Cancel
+                </Button>
+              )}
             </div>
           </div>
         )}

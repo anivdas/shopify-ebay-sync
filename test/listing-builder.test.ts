@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cleanAspects, ebayQuantity, ebaySku, gtinFields, inferFormat, inferMovieTitle, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
+import { cleanAspects, DESCRIPTION_STYLE, ebayQuantity, ebaySku, gtinFields, inferAspects, inferFormat, inferMovieTitle, normalizeStyles, optionsLabel, renderDescription, renderTitle, sanitizeHtml, smartTitle, truncateWords } from '../src/listing-builder.ts';
 
 test('title template dedupes brand and limits to 80 chars', () => {
   assert.equal(renderTitle('{brand} {title} {options}', { brand: 'Sony', title: 'Sony WH-1000XM5 Headphones', options: 'Black' }), 'Sony WH-1000XM5 Headphones Black');
@@ -24,15 +24,24 @@ test('sanitizeHtml removes active content', () => {
   assert.equal(out, '<p>Hi</p><a href="#">l</a>');
 });
 
-test('renderDescription escapes title and inserts description', () => {
-  assert.equal(renderDescription('<h1>{{title}}</h1>{{description}}', { title: 'A<B', description: '<b>x</b>', showFullTitle: false }), '<h1>A&lt;B</h1><b>x</b>');
+const unwrap = (html: string) => html.replace(new RegExp(`^<div style="${DESCRIPTION_STYLE}">\\n`), '').replace(/\n<\/div>$/, '');
+
+test('renderDescription escapes title and inserts description in one consistent wrapper', () => {
+  const out = renderDescription('<h1>{{title}}</h1>{{description}}', { title: 'A<B', description: '<b>x</b>', showFullTitle: false });
+  assert.ok(out.startsWith(`<div style="${DESCRIPTION_STYLE}">`));
+  assert.equal(unwrap(out), '<h1>A&lt;B</h1><b>x</b>');
 });
 
-test('renderDescription adds the full Shopify name on top unless the template places it', () => {
-  const out = renderDescription('{{description}}', { title: 'Movie', fullTitle: 'Movie 4K Steelbook - Region Free', description: '<p>d</p>' });
+test('renderDescription adds the full Shopify name on top (inside the wrapper) unless the template places it', () => {
+  const out = unwrap(renderDescription('{{description}}', { title: 'Movie', fullTitle: 'Movie 4K Steelbook - Region Free', description: '<p>d</p>' }));
   assert.match(out, /^<p[^>]*><b>This listing is for:<\/b> Movie 4K Steelbook - Region Free<\/p>/);
-  const placed = renderDescription('<h2>{{full_title}}</h2>{{description}}', { title: 'Movie', fullTitle: 'Movie Full', description: '' });
+  const placed = unwrap(renderDescription('<h2>{{full_title}}</h2>{{description}}', { title: 'Movie', fullTitle: 'Movie Full', description: '' }));
   assert.equal(placed, '<h2>Movie Full</h2>');
+});
+
+test('normalizeStyles removes pasted fonts and colors but keeps structure', () => {
+  const html = '<p style="font-family:Times;font-size:18px;text-align:center;color:red"><font face="Comic Sans">Hi</font> <span style="font-size:20px">there</span> <b style="color:#000">bold</b></p>';
+  assert.equal(normalizeStyles(html), '<p style="text-align:center">Hi there <b>bold</b></p>');
 });
 
 test('smartTitle keeps short titles untouched', () => {
@@ -89,16 +98,38 @@ test('cleanAspects normalizes', () => {
   assert.deepEqual(cleanAspects({ Brand: 'Sony', Color: ['Black', 'Black', ''], Empty: '' }), { Brand: ['Sony'], Color: ['Black'] });
 });
 
-test('inferFormat detects format from title', () => {
+test('inferFormat detects format and maps to eBay allowed values', () => {
   assert.equal(inferFormat('Blade Runner 4K Ultra HD Blu-ray'), '4K UHD');
   assert.equal(inferFormat('Movie Blu-ray Steelbook'), 'Blu-ray');
   assert.equal(inferFormat('Movie DVD'), 'DVD');
+  assert.equal(inferFormat('The Substance Blu-ray TheOn KimchiDVD Exclusive'), 'Blu-ray', 'DVD inside a word is ignored');
   assert.equal(inferFormat('Movie'), null);
+  const allowed = ['Blu-ray', 'Blu-ray 3D', '4K UHD Blu-ray', 'DVD', 'HD DVD'];
+  assert.equal(inferFormat('Dune 4K Blu-ray Steelbook', allowed), '4K UHD Blu-ray');
+  assert.equal(inferFormat('Dune Blu-ray Steelbook', allowed), 'Blu-ray');
+  assert.equal(inferFormat('Dune DVD', allowed), 'DVD');
 });
 
-test('inferMovieTitle extracts movie name', () => {
+test('inferMovieTitle extracts the movie name', () => {
   assert.equal(inferMovieTitle('Blade Runner 4K Ultra HD Blu-ray Steelbook'), 'Blade Runner');
   assert.equal(inferMovieTitle('The Matrix 4K UHD Limited Edition Steelbook', 'Warner'), 'The Matrix');
   assert.equal(inferMovieTitle('HDzeta Blade Runner 2049 Steelbook', 'HDzeta'), 'Blade Runner 2049');
-  assert.equal(inferMovieTitle('Inception Blu-ray'), 'Inception');
+  assert.equal(inferMovieTitle('The Substance 4K Blu-ray Steelbook TheOn KimchiDVD Exclusive #44 One Click Box Set'), 'The Substance');
+  assert.equal(inferMovieTitle('The Substance (4K UHD + 2D Blu-ray) Steelbook Limited Edition'), 'The Substance');
+  assert.equal(inferMovieTitle('Back to the Future - 40th Anniversary 4K'), 'Back to the Future');
+  assert.equal(inferMovieTitle('Superman (2025) 4K Blu-ray Steelbook'), 'Superman');
+  assert.equal(inferMovieTitle('Tokyo Ghoul - The Complete Series Blu-ray'), 'Tokyo Ghoul');
+  assert.equal(inferMovieTitle('Inception'), 'Inception');
+});
+
+test('inferAspects fills only empty aspects using allowed values', () => {
+  const defs = [
+    { name: 'Format', values: ['Blu-ray', '4K UHD Blu-ray', 'DVD'], freeText: false },
+    { name: 'Movie/TV Title', values: [], freeText: true },
+    { name: 'Case Type', values: ['Standard', 'Steelbook'], freeText: false },
+    { name: 'Region Code', values: ['Region Free', 'A/1 (North America)'], freeText: false },
+    { name: 'Genre', values: ['Horror'], freeText: true },
+  ];
+  const out = inferAspects({ title: 'The Substance 4K Blu-ray Steelbook', description: 'Playback: Region Free' }, defs, { 'Case Type': ['Standard'] });
+  assert.deepEqual(out, { Format: ['4K UHD Blu-ray'], 'Movie/TV Title': ['The Substance'], 'Region Code': ['Region Free'] });
 });

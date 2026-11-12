@@ -1,6 +1,7 @@
 # Agent notes
 
 ## Commands
+- This Windows machine has no system Node: run `export PATH="/d/Devin/.tools/node-v24.22.2-win-x64:$PATH"` (bash) first. Never commit without a passing `npm run check`.
 - `npm ci` – install (dev deps only; the server has zero runtime npm deps)
 - `npm run check` – typecheck (server + web) + tests + UI build. Run before committing.
 - `npm test` – node:test suites in `test/` (Shopify/eBay APIs are mocked via global fetch)

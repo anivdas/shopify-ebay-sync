@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, ExternalLink, Lock, RefreshCw, Rocket, Save, Search, Trash2, Unlock, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, ExternalLink, Lock, RefreshCw, Rocket, Save, Search, Sparkles, Trash2, Unlock, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, del, money, pct, post, put, useApi } from '../api.ts';
 import { Badge, Button, Callout, Card, cx, Field, Link, PageHeader, Spinner, StatusBadge, Toggle, useAction, useConfirm, useRouter } from '../ui.tsx';
@@ -14,6 +14,8 @@ export function ListingEditor({ id }: { id: number }) {
   const policies = useApi(status.data?.ebay?.connected ? '/api/ebay/policies' : null);
   const locations = useApi(status.data?.ebay?.connected ? '/api/ebay/locations' : null);
   const settingsQ = useApi('/api/settings');
+  const defaults = settingsQ.data?.settings ?? {};
+  const defaultLabel = (key: string | undefined, name: string | undefined) => (key ? `Use default (${name ?? key})` : 'Select... (no default set)');
   const boxes = JSON.parse(settingsQ.data?.settings?.shippingBoxes || '[]') as { id: string; name: string; length: number; width: number; height: number; unit: string }[];
   const [draft, setDraft] = useState<any>(null);
   const [items, setItems] = useState<Record<number, any>>({});
@@ -156,7 +158,7 @@ export function ListingEditor({ id }: { id: number }) {
             </div>
           </Card>
 
-          {draft.category_id && <AspectsEditor categoryId={draft.category_id} aspects={draft.aspects} variesBy={draft.varies_by} items={l.items} kind={l.kind} onChange={(a) => set('aspects', a)} onVariesBy={(v) => set('varies_by', v)} />}
+          {draft.category_id && <AspectsEditor listingId={id} categoryId={draft.category_id} aspects={draft.aspects} variesBy={draft.varies_by} items={l.items} kind={l.kind} onChange={(a) => set('aspects', a)} onVariesBy={(v) => set('varies_by', v)} />}
 
           <Card title={<span className="flex items-center gap-1">Description <LockBtn f="description" /></span>} description="HTML. Scripts and iframes are stripped automatically.">
             <div className="grid gap-4 lg:grid-cols-2">
@@ -305,13 +307,13 @@ export function ListingEditor({ id }: { id: number }) {
                 </select>
               </Field>
               {[
-                ['fulfillment_policy_id', 'Shipping policy', policies.data?.fulfillment],
-                ['payment_policy_id', 'Payment policy', policies.data?.payment],
-                ['return_policy_id', 'Return policy', policies.data?.returns],
-              ].map(([k, label, list]: any) => (
+                ['fulfillment_policy_id', 'Shipping policy', policies.data?.fulfillment, defaults.fulfillmentPolicyId],
+                ['payment_policy_id', 'Payment policy', policies.data?.payment, defaults.paymentPolicyId],
+                ['return_policy_id', 'Return policy', policies.data?.returns, defaults.returnPolicyId],
+              ].map(([k, label, list, def]: any) => (
                 <Field key={k} label={label}>
                   <select className="input" value={draft[k] ?? ''} onChange={(e) => set(k, e.target.value)}>
-                    <option value="">Select...</option>
+                    <option value="">{defaultLabel(def, (list ?? []).find((p: any) => p.id === def)?.name)}</option>
                     {(list ?? []).map((p: any) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -322,7 +324,7 @@ export function ListingEditor({ id }: { id: number }) {
               ))}
               <Field label="Ships from">
                 <select className="input" value={draft.merchant_location_key ?? ''} onChange={(e) => set('merchant_location_key', e.target.value)}>
-                  <option value="">Select...</option>
+                  <option value="">{defaultLabel(defaults.merchantLocationKey, (locations.data?.locations ?? []).find((x: any) => x.merchantLocationKey === defaults.merchantLocationKey)?.name)}</option>
                   {(locations.data?.locations ?? []).map((x: any) => (
                     <option key={x.merchantLocationKey} value={x.merchantLocationKey}>
                       {x.name ?? x.merchantLocationKey}
@@ -441,10 +443,12 @@ function CategoryPicker({ value, defaultQuery, onChange }: { value: { id: string
   );
 }
 
-function AspectsEditor({ categoryId, aspects, variesBy, items, kind, onChange, onVariesBy }: { categoryId: string; aspects: Record<string, string[]>; variesBy: string[]; items: any[]; kind: string; onChange: (a: Record<string, string[]>) => void; onVariesBy: (v: string[]) => void }) {
+function AspectsEditor({ listingId, categoryId, aspects, variesBy, items, kind, onChange, onVariesBy }: { listingId: number; categoryId: string; aspects: Record<string, string[]>; variesBy: string[]; items: any[]; kind: string; onChange: (a: Record<string, string[]>) => void; onVariesBy: (v: string[]) => void }) {
   const { data, loading, error } = useApi<{ aspects: Aspect[] }>(`/api/ebay/aspects?categoryId=${categoryId}`);
   const [showAll, setShowAll] = useState(false);
   const [autoFilling, setAutoFilling] = useState(false);
+  /** null = not tried yet; otherwise the aspect names filled by the last auto-fill */
+  const [filled, setFilled] = useState<string[] | null>(null);
   const optionNames = [...new Set(items.flatMap((i) => Object.keys(i.options)))];
   const defs = data?.aspects ?? [];
   const known = new Set(defs.map((d) => d.name));
@@ -462,23 +466,19 @@ function AspectsEditor({ categoryId, aspects, variesBy, items, kind, onChange, o
   const autoFill = async () => {
     setAutoFilling(true);
     try {
-      const productTitle = items[0]?.title || '';
-      const brand = aspects['Brand']?.[0] || null;
-      const inferred = await post('/api/tools/infer-item-specifics', { title: productTitle, brand });
-      const next = { ...aspects };
-      if (inferred.format && !aspects['Format']?.length) {
-        next['Format'] = [inferred.format];
-      }
-      if (inferred.movieTitle && !aspects['Movie/TV Title']?.length) {
-        next['Movie/TV Title'] = [inferred.movieTitle];
-      }
-      onChange(next);
-    } catch (e) {
-      console.error('Auto-fill failed', e);
+      const r = await post<{ aspects: Record<string, string[]> }>(`/api/listings/${listingId}/infer-aspects`, { categoryId, aspects });
+      setFilled(Object.keys(r.aspects));
+      if (Object.keys(r.aspects).length) onChange({ ...aspects, ...r.aspects });
+    } catch {
+      setFilled([]);
     } finally {
       setAutoFilling(false);
     }
   };
+  const missingRequired = defs.some((d) => d.required && !aspects[d.name]?.length && !coveredByVariant(d.name));
+  useEffect(() => {
+    if (missingRequired && filled === null && !autoFilling) autoFill();
+  }, [missingRequired, categoryId]);
 
   return (
     <Card
@@ -486,8 +486,8 @@ function AspectsEditor({ categoryId, aspects, variesBy, items, kind, onChange, o
       description="Required ones must be filled in. Recommended ones help buyers find you in search filters."
       actions={
         <div className="flex gap-2">
-          <Button variant="ghost" className="px-2 py-1 text-xs" loading={autoFilling} onClick={autoFill}>
-            Auto-fill from title
+          <Button variant="ghost" className="px-2 py-1 text-xs" loading={autoFilling} onClick={autoFill} title="Fills empty Format, Movie/TV Title, Case Type and Region Code from the Shopify title and description">
+            <Sparkles className="size-3.5" /> Auto-fill
           </Button>
           <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setShowAll(!showAll)}>
             {showAll ? 'Show fewer' : `Show all (${defs.length})`}
@@ -506,6 +506,13 @@ function AspectsEditor({ categoryId, aspects, variesBy, items, kind, onChange, o
             ))}
           </div>
           <p className="mt-2 text-xs text-zinc-500">These come from your Shopify options. Each variant's values (e.g. Red / XL) are sent to eBay automatically.</p>
+        </div>
+      )}
+      {!!filled?.length && (
+        <div className="mb-4">
+          <Callout kind="info">
+            Filled in from the product title: <b>{filled.join(', ')}</b>. Check them, then click Save.
+          </Callout>
         </div>
       )}
       {loading && !data ? (

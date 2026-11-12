@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { runAutoList } from './autolist.ts';
 import * as catalog from './catalog.ts';
 import { eligibility, listOverrides, setOverride } from './rules.ts';
-import { inferFormat, inferMovieTitle, smartTitle } from './listing-builder.ts';
+import { inferAspects, smartTitle, stripHtml } from './listing-builder.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
 import { all, get, getSettings, getState, json, run, setState, updateSettings } from './db.ts';
@@ -89,7 +89,7 @@ router.get('/api/status', () => {
     version: config.version,
     checklist: checklist(),
     shopify: { configured: shopifyConfigured(), shop: shopifyConf().shop, test: getState('shopifyTest') ?? null },
-    ebay: { configured: ebayConfigured(), connected: ebay.ebayConnected(), env: ebayConf().env, marketplace: ebayConf().marketplaceId, currency: ebayConf().currency, test: getState('ebayTest') ?? null, refreshExpires: ebay.refreshTokenExpiry() },
+    ebay: { configured: ebayConfigured(), connected: ebay.ebayConnected(), env: ebayConf().env, marketplace: ebayConf().marketplaceId, country: ebayConf().country, currency: ebayConf().currency, test: getState('ebayTest') ?? null, refreshExpires: ebay.refreshTokenExpiry() },
     counts,
     sales30,
     salesByDay,
@@ -198,19 +198,17 @@ router.post('/api/ebay/locations', async ({ body }) => {
   updateSettings({ merchantLocationKey: key });
   return { key };
 });
-router.put('/api/ebay/locations', async ({ body }) => {
-  const key = String(body?.key);
-  if (!key) throw new Error('Location key is required');
-  await ebay.updateLocation(key, { name: body?.name, postalCode: body?.postalCode, country: body?.country || ebayConf().country, city: body?.city, stateOrProvince: body?.stateOrProvince });
-  return { key };
+router.put('/api/ebay/locations/:key', async ({ params, body }) => {
+  if (!body?.postalCode) throw new HttpError(400, 'ZIP / postal code is required');
+  await ebay.updateLocation(params.key, { name: body.name || params.key, postalCode: body.postalCode, country: body.country || ebayConf().country, city: body.city, stateOrProvince: body.stateOrProvince });
+  return { key: params.key };
 });
-router.delete('/api/ebay/locations', async ({ body }) => {
-  const key = String(body?.key);
-  if (!key) throw new Error('Location key is required');
-  await ebay.deleteLocation(key);
-  const s = getSettings();
-  if (s.merchantLocationKey === key) updateSettings({ merchantLocationKey: '' });
-  return { key });
+router.del('/api/ebay/locations/:key', async ({ params }) => {
+  const used = get<{ n: number }>("SELECT COUNT(*) AS n FROM ebay_listings WHERE merchant_location_key = ? AND status != 'draft'", params.key)?.n ?? 0;
+  if (used) throw new HttpError(409, `${used} published listing(s) use this location. Edit it instead of deleting it.`);
+  await ebay.deleteLocation(params.key);
+  if (getSettings().merchantLocationKey === params.key) updateSettings({ merchantLocationKey: '' });
+  return { key: params.key };
 });
 router.get('/api/ebay/categories', async ({ query }) => ({ categories: await ebay.suggestCategories(query.get('q') ?? '') }));
 router.get('/api/ebay/aspects', async ({ query }) => ({ aspects: await ebay.getAspects(query.get('categoryId') ?? '') }));
@@ -270,13 +268,14 @@ router.post('/api/products/:id/override', async ({ params, body }) => {
 
 router.post('/api/tools/title-preview', ({ body }) => smartTitle(String(body?.title ?? '')));
 
-router.post('/api/tools/infer-item-specifics', ({ body }) => {
-  const title = String(body?.title ?? '');
-  const brand = body?.brand ? String(body.brand) : null;
-  return {
-    format: inferFormat(title),
-    movieTitle: inferMovieTitle(title, brand),
-  };
+router.post('/api/listings/:id/infer-aspects', async (ctx) => {
+  const l = L.getListing(id(ctx));
+  if (!l) throw new HttpError(404, 'Listing not found');
+  const categoryId = String(ctx.body?.categoryId || l.category_id || '');
+  if (!categoryId) throw new HttpError(400, 'Choose an eBay category first');
+  const defs = await ebay.getAspects(categoryId);
+  const title = l.product_title || l.title;
+  return { aspects: inferAspects({ title, description: stripHtml(l.description_html), brand: l.brand }, defs, ctx.body?.aspects ?? {}) };
 });
 
 router.post('/api/alerts/test', async () => {

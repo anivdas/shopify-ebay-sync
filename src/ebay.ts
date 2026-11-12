@@ -182,10 +182,9 @@ export const createLocation = (key: string, loc: { name: string; postalCode: str
   });
 
 export const updateLocation = (key: string, loc: { name: string; postalCode: string; country: string; city?: string; stateOrProvince?: string }) =>
-  ebay('PUT', `/sell/inventory/v1/location/${encodeURIComponent(key)}`, {
+  ebay('POST', `/sell/inventory/v1/location/${encodeURIComponent(key)}/update_location_details`, {
     body: {
       name: loc.name,
-      merchantLocationStatus: 'ENABLED',
       locationTypes: ['WAREHOUSE'],
       location: { address: { postalCode: loc.postalCode, country: loc.country, city: loc.city, stateOrProvince: loc.stateOrProvince } },
     },

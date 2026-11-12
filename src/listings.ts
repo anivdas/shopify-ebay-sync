@@ -6,6 +6,7 @@ import {
   ebayQuantity,
   ebaySku,
   gtinFields,
+  inferAspects,
   optionsLabel,
   renderDescription,
   renderTitle,
@@ -266,6 +267,10 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
       const gtin = gtinFields(first.barcode);
       if (gtin.aspect) aspects[gtin.aspect[0]] = [gtin.aspect[1]];
     }
+    if (category?.id) {
+      const defs = await ebay.getAspects(category.id).catch(() => []);
+      Object.assign(aspects, inferAspects({ title: product.title, description: stripHtml(product.descriptionHtml ?? ''), brand }, defs, aspects));
+    }
     const fullTitle = fullProductTitle(product.title, asGroup ? null : first.variant_title);
     const title = renderTitle(profile?.title_template || settings.titleTemplate, {
       brand,
@@ -480,10 +485,10 @@ export async function validateListing(id: number): Promise<Issue[]> {
   if (!listing.title.trim()) err('title', 'Title is required');
   if (listing.title.length > 80) err('title', 'Title must be 80 characters or fewer');
   if (!listing.category_id) err('category_id', 'Choose an eBay category');
-  if (!listing.fulfillment_policy_id) err('fulfillment_policy_id', 'Choose a shipping (fulfillment) policy');
-  if (!listing.payment_policy_id) err('payment_policy_id', 'Choose a payment policy');
-  if (!listing.return_policy_id) err('return_policy_id', 'Choose a return policy');
-  if (!listing.merchant_location_key) err('merchant_location_key', 'Choose an inventory location (Settings > eBay)');
+  if (!listing.fulfillment_policy_id && !settings.fulfillmentPolicyId) err('fulfillment_policy_id', 'Choose a shipping (fulfillment) policy');
+  if (!listing.payment_policy_id && !settings.paymentPolicyId) err('payment_policy_id', 'Choose a payment policy');
+  if (!listing.return_policy_id && !settings.returnPolicyId) err('return_policy_id', 'Choose a return policy');
+  if (!listing.merchant_location_key && !settings.merchantLocationKey) err('merchant_location_key', 'Choose an inventory location (Settings > eBay defaults)');
   const images = json<string[]>(listing.image_urls, []);
   if (!images.length) err('image_urls', 'At least one image is required');
   if (images.some((u) => !u.startsWith('https://'))) err('image_urls', 'All image URLs must use https');
@@ -578,12 +583,12 @@ export function offerPayload(listing: Listing, item: Item, price: number, qty: n
     format: 'FIXED_PRICE',
     availableQuantity: qty,
     categoryId: listing.category_id!,
-    merchantLocationKey: listing.merchant_location_key!,
+    merchantLocationKey: (listing.merchant_location_key || settings.merchantLocationKey)!,
     pricingSummary: { price: money(price) },
     listingPolicies: {
-      fulfillmentPolicyId: listing.fulfillment_policy_id!,
-      paymentPolicyId: listing.payment_policy_id!,
-      returnPolicyId: listing.return_policy_id!,
+      fulfillmentPolicyId: (listing.fulfillment_policy_id || settings.fulfillmentPolicyId)!,
+      paymentPolicyId: (listing.payment_policy_id || settings.paymentPolicyId)!,
+      returnPolicyId: (listing.return_policy_id || settings.returnPolicyId)!,
     },
   };
   if (listing.kind === 'single') offer.listingDescription = listing.description_html;
