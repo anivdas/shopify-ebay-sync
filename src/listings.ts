@@ -16,8 +16,20 @@ import { bestOfferThresholds, effectiveBase, priceAtPct, type PricingRules } fro
 import { excludedReasonFor, profileFor, profileRules } from './rules.ts';
 import { getBoxes, packageWeightAndSize, resolveBox, toOunces } from './shipping.ts';
 
-/** The vendor as eBay brand, only when Settings say the Shopify Vendor field really is the brand. */
-export const brandFromVendor = (vendor: string | null | undefined, settings: Settings) => (settings.vendorMode === 'brand' && vendor?.trim() ? vendor.trim() : null);
+const normVendor = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/** True for vendors buyers don't search for (e.g. Walmart, Best Buy), from Settings > Templates. */
+export const isIgnoredVendor = (vendor: string | null | undefined, settings: Settings) =>
+  !!vendor?.trim() &&
+  String(settings.ignoredVendors ?? '')
+    .split(',')
+    .map((v) => normVendor(v))
+    .filter(Boolean)
+    .includes(normVendor(vendor));
+
+/** The vendor as eBay brand (title + Brand item specific), unless it's an ignored retailer or Vendor isn't the brand. */
+export const brandFromVendor = (vendor: string | null | undefined, settings: Settings) =>
+  settings.vendorMode === 'brand' && vendor?.trim() && !isIgnoredVendor(vendor, settings) ? vendor.trim() : null;
 
 /** The complete Shopify name (product + variant), shown in the eBay description so nothing is lost when the title is shortened. */
 export const fullProductTitle = (productTitle: string, variantTitle: string | null) =>
@@ -246,7 +258,8 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
     const aspects: Record<string, string[]> = { ...json<Record<string, string[]>>(profile?.default_aspects, {}) };
     const brand = brandFromVendor(product.vendor, settings);
     if (brand) aspects.Brand = [brand];
-    else if (settings.vendorMode === 'aspect' && product.vendor?.trim() && settings.vendorAspectName.trim()) aspects[settings.vendorAspectName.trim()] = [product.vendor.trim()];
+    else if (settings.vendorMode === 'aspect' && product.vendor?.trim() && !isIgnoredVendor(product.vendor, settings) && settings.vendorAspectName.trim())
+      aspects[settings.vendorAspectName.trim()] = [product.vendor.trim()];
     if (product.productType && !aspects.Type) aspects.Type = [product.productType];
     if (!asGroup) {
       for (const [k, v] of Object.entries(first.options)) aspects[k] = [v];

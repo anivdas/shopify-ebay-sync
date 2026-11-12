@@ -293,6 +293,8 @@ export const defaultSettings = {
   // 'aspect' = another item specific (vendorAspectName), 'ignore' = not used on eBay
   vendorMode: 'brand',
   vendorAspectName: 'Edition',
+  // Vendors buyers don't search for (big retailers): never used as brand or in titles. Comma-separated.
+  ignoredVendors: 'Walmart, Best Buy, Target, Amazon, Costco',
   showFullTitleInDescription: true,
   // Rules. JSON arrays of { field: 'title'|'tag'|'type'|'vendor'|'collection', value: string } (case-insensitive "contains")
   excludeRules: JSON.stringify([

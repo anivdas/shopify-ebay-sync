@@ -906,7 +906,7 @@ export function RulesSection() {
 export function TemplatesSection() {
   const { settings, save } = useSettings();
   const { busy, run } = useAction();
-  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription', 'vendorMode', 'vendorAspectName']);
+  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription', 'vendorMode', 'vendorAspectName', 'ignoredVendors']);
   const [sample, setSample] = useState('The Lord of the Rings: The Return of the King 4K Ultra HD Blu-ray Disc + Digital Code Limited Edition Steelbook Collection');
   const [preview, setPreview] = useState<{ title: string; shortened: boolean; removed: string[] } | null>(null);
   useEffect(() => {
@@ -918,12 +918,15 @@ export function TemplatesSection() {
   return (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="What is your Shopify &quot;Vendor&quot; field?" hint="Many stores use Vendor for the supplier or exclusive retailer (e.g. HDzeta, Best Buy), not the brand.">
+        <Field label="What is your Shopify &quot;Vendor&quot; field?" hint="E.g. a boutique label buyers search for (HDzeta, WeET, Mantalab) is a brand.">
           <select className="input" value={draft.vendorMode ?? 'brand'} onChange={(e) => set('vendorMode', e.target.value)}>
-            <option value="brand">The brand: use it as eBay Brand and for {'{brand}'} in titles</option>
+            <option value="brand">The brand / label: use it as eBay Brand and for {'{brand}'} in titles</option>
             <option value="aspect">Something else: put it in another item specific</option>
             <option value="ignore">Not relevant for eBay: don't use it</option>
           </select>
+        </Field>
+        <Field label="Vendors buyers don't search for" hint="Comma-separated. These are never added to titles or item specifics.">
+          <input className="input" value={draft.ignoredVendors ?? ''} onChange={(e) => set('ignoredVendors', e.target.value)} placeholder="Walmart, Best Buy, Target" />
         </Field>
         {draft.vendorMode === 'aspect' && (
           <Field label="Item specific name for the vendor" hint='e.g. "Edition" or "Studio" (must match the eBay category item specific)'>
@@ -931,7 +934,10 @@ export function TemplatesSection() {
           </Field>
         )}
       </div>
-      <Field label="Title template" hint={`Placeholders: {brand} {title} {options} {type} {sku}.${draft.vendorMode !== 'brand' ? ' {brand} is empty because Vendor isn\u2019t used as the brand.' : ''}`}>
+      <Field
+        label="Title template"
+        hint={`Placeholders: {brand} {title} {options} {type} {sku}. Tip: "{title} {brand} {options}" leads with the product name, which is what buyers type first. The brand is skipped if it's already in the title.${draft.vendorMode !== 'brand' ? ' {brand} is empty because Vendor isn\u2019t used as the brand.' : ''}`}
+      >
         <input className="input font-mono" value={draft.titleTemplate ?? ''} onChange={(e) => set('titleTemplate', e.target.value)} />
       </Field>
       <div className="rounded-xl bg-zinc-50 p-4 dark:bg-white/[0.03]">
