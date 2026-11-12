@@ -483,7 +483,7 @@ router.post('/api/market/check', async ({ body }) => {
   await researchVariant({
     variantId: variant.id,
     barcode: variant.barcode,
-    brand: product.vendor,
+    brand: L.brandFromVendor(product.vendor, s),
     title: product.title,
     options: Object.fromEntries(variant.selectedOptions.filter((o) => o.value !== 'Default Title').map((o) => [o.name, o.value])),
     basePrice: base,

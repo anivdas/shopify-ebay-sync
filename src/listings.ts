@@ -16,6 +16,9 @@ import { bestOfferThresholds, effectiveBase, priceAtPct, type PricingRules } fro
 import { excludedReasonFor, profileFor, profileRules } from './rules.ts';
 import { getBoxes, packageWeightAndSize, resolveBox, toOunces } from './shipping.ts';
 
+/** The vendor as eBay brand, only when Settings say the Shopify Vendor field really is the brand. */
+export const brandFromVendor = (vendor: string | null | undefined, settings: Settings) => (settings.vendorMode === 'brand' && vendor?.trim() ? vendor.trim() : null);
+
 /** The complete Shopify name (product + variant), shown in the eBay description so nothing is lost when the title is shortened. */
 export const fullProductTitle = (productTitle: string, variantTitle: string | null) =>
   variantTitle && variantTitle !== 'Default Title' ? `${productTitle} - ${variantTitle}` : productTitle;
@@ -206,7 +209,7 @@ function uniqueSku(sku: string, variantGid: string): string {
 
 async function defaultCategory(product: shopify.ShopifyProduct) {
   try {
-    const [top] = await ebay.suggestCategories(`${product.vendor} ${product.title} ${product.productType}`.trim());
+    const [top] = await ebay.suggestCategories(`${product.title} ${product.productType}`.trim());
     return top ? { id: top.id, name: top.path } : null;
   } catch {
     return null;
@@ -241,7 +244,9 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
   for (const groupVariants of groups) {
     const first = itemFromVariant(groupVariants[0]);
     const aspects: Record<string, string[]> = { ...json<Record<string, string[]>>(profile?.default_aspects, {}) };
-    if (product.vendor) aspects.Brand = [product.vendor];
+    const brand = brandFromVendor(product.vendor, settings);
+    if (brand) aspects.Brand = [brand];
+    else if (settings.vendorMode === 'aspect' && product.vendor?.trim() && settings.vendorAspectName.trim()) aspects[settings.vendorAspectName.trim()] = [product.vendor.trim()];
     if (product.productType && !aspects.Type) aspects.Type = [product.productType];
     if (!asGroup) {
       for (const [k, v] of Object.entries(first.options)) aspects[k] = [v];
@@ -250,7 +255,7 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
     }
     const fullTitle = fullProductTitle(product.title, asGroup ? null : first.variant_title);
     const title = renderTitle(profile?.title_template || settings.titleTemplate, {
-      brand: product.vendor,
+      brand,
       title: product.title,
       options: asGroup ? '' : optionsLabel(first.options),
       productType: product.productType,
@@ -276,7 +281,7 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
         groupKey,
         product.id,
         product.title,
-        product.vendor || null,
+        brand,
         profile?.id ?? null,
         title,
         category?.id ?? null,
@@ -391,7 +396,7 @@ export async function refreshFromShopify(id: number) {
   if (!locked.has('title')) {
     const first = items[0] ? json<Record<string, string>>(items[0].options, {}) : {};
     patch.title = renderTitle(profile?.title_template || settings.titleTemplate, {
-      brand: product.vendor,
+      brand: brandFromVendor(product.vendor, settings),
       title: product.title,
       options: listing.kind === 'group' ? '' : optionsLabel(first),
       productType: product.productType,
@@ -441,7 +446,7 @@ export async function refreshFromShopify(id: number) {
       item.id,
     );
   }
-  run('UPDATE ebay_listings SET product_title = ?, brand = ? WHERE id = ?', product.title, product.vendor || null, id);
+  run('UPDATE ebay_listings SET product_title = ?, brand = ? WHERE id = ?', product.title, brandFromVendor(product.vendor, settings), id);
 }
 
 // ---------------- Validation ----------------

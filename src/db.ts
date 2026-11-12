@@ -289,6 +289,10 @@ export const defaultSettings = {
   returnPolicyId: '',
   merchantLocationKey: '',
   titleTemplate: '{brand} {title} {options}',
+  // How the Shopify "Vendor" field is used: 'brand' = eBay Brand + {brand} in titles,
+  // 'aspect' = another item specific (vendorAspectName), 'ignore' = not used on eBay
+  vendorMode: 'brand',
+  vendorAspectName: 'Edition',
   showFullTitleInDescription: true,
   // Rules. JSON arrays of { field: 'title'|'tag'|'type'|'vendor'|'collection', value: string } (case-insensitive "contains")
   excludeRules: JSON.stringify([

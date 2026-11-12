@@ -906,7 +906,7 @@ export function RulesSection() {
 export function TemplatesSection() {
   const { settings, save } = useSettings();
   const { busy, run } = useAction();
-  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription']);
+  const { draft, set, dirty } = useDraft(settings, ['titleTemplate', 'descriptionTemplate', 'showFullTitleInDescription', 'vendorMode', 'vendorAspectName']);
   const [sample, setSample] = useState('The Lord of the Rings: The Return of the King 4K Ultra HD Blu-ray Disc + Digital Code Limited Edition Steelbook Collection');
   const [preview, setPreview] = useState<{ title: string; shortened: boolean; removed: string[] } | null>(null);
   useEffect(() => {
@@ -917,7 +917,21 @@ export function TemplatesSection() {
   const fullLine = draft.showFullTitleInDescription && !/\{\{\s*full_title\s*\}\}/.test(draft.descriptionTemplate ?? '') ? `<p style="font-size:15px"><b>This listing is for:</b> ${sample}</p>` : '';
   return (
     <div className="space-y-5">
-      <Field label="Title template" hint="Placeholders: {brand} {title} {options} {type} {sku}.">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="What is your Shopify &quot;Vendor&quot; field?" hint="Many stores use Vendor for the supplier or exclusive retailer (e.g. HDzeta, Best Buy), not the brand.">
+          <select className="input" value={draft.vendorMode ?? 'brand'} onChange={(e) => set('vendorMode', e.target.value)}>
+            <option value="brand">The brand: use it as eBay Brand and for {'{brand}'} in titles</option>
+            <option value="aspect">Something else: put it in another item specific</option>
+            <option value="ignore">Not relevant for eBay: don't use it</option>
+          </select>
+        </Field>
+        {draft.vendorMode === 'aspect' && (
+          <Field label="Item specific name for the vendor" hint='e.g. "Edition" or "Studio" (must match the eBay category item specific)'>
+            <input className="input" value={draft.vendorAspectName ?? ''} onChange={(e) => set('vendorAspectName', e.target.value)} />
+          </Field>
+        )}
+      </div>
+      <Field label="Title template" hint={`Placeholders: {brand} {title} {options} {type} {sku}.${draft.vendorMode !== 'brand' ? ' {brand} is empty because Vendor isn\u2019t used as the brand.' : ''}`}>
         <input className="input font-mono" value={draft.titleTemplate ?? ''} onChange={(e) => set('titleTemplate', e.target.value)} />
       </Field>
       <div className="rounded-xl bg-zinc-50 p-4 dark:bg-white/[0.03]">
