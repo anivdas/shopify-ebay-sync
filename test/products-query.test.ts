@@ -60,3 +60,13 @@ test('"Hide listed" fills each page from later Shopify pages and resumes without
   const all = await get('/api/shopify/products?first=50');
   assert.equal(all.products.length, 7, 'without the filter, listed products are shown');
 });
+
+test('"Hide preorders" matches preorder spellings in titles only as a word', async () => {
+  const { isPreorderTitle } = await import('../src/routes.ts');
+  for (const t of ['Akira [PREORDER]', 'Pre-order: Alien 4K', 'Heat (Pre Order)', 'preorders ship in May']) assert.equal(isPreorderTitle(t), true, t);
+  for (const t of ['The Substance 4K Steelbook', 'Spreorderly', 'Order of the Phoenix']) assert.equal(isPreorderTitle(t), false, t);
+  store[2].title = 'P3 [Pre-Order]';
+  const page = await get('/api/shopify/products?first=50&hidePreorder=1');
+  assert.deepEqual(page.products.map((p: any) => p.title), ['P1', 'P2', 'P4', 'P5', 'P6', 'P7']);
+  store[2].title = 'P3';
+});

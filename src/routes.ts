@@ -226,9 +226,12 @@ router.get('/api/ebay/aspects', async ({ query }) => ({ aspects: await ebay.getA
 
 // ============ Shopify ============
 
+export const isPreorderTitle = (title: string) => /\bpre[-\s]?orders?\b/i.test(title);
+
 router.get('/api/shopify/products', async ({ query }) => {
   const first = Math.min(num(query.get('first'), 50), 50);
   const hideListed = query.get('hideListed') === '1';
+  const hidePreorder = query.get('hidePreorder') === '1';
   const linked = new Map<string, { listing_id: number; status: string; linked_variants: number }>(
     all<{ shopify_product_id: string; listing_id: number; status: string; linked_variants: number }>(
       `SELECT l.shopify_product_id, MIN(l.id) AS listing_id, MIN(l.status) AS status, COUNT(i.id) AS linked_variants
@@ -236,6 +239,7 @@ router.get('/api/shopify/products', async ({ query }) => {
     ).map((r) => [r.shopify_product_id, r]),
   );
   const fullyListed = (p: shopify.ProductSummary) => (linked.get(p.id)?.linked_variants ?? 0) >= p.variantsCount.count;
+  const hidden = (p: shopify.ProductSummary) => (hideListed && fullyListed(p)) || (hidePreorder && isPreorderTitle(p.title));
   // Listing status lives in this app, not Shopify, so hidden products are skipped here and more pages are
   // read until the page is full; the cursor resumes right after the last product looked at.
   const nodes: shopify.ProductSummary[] = [];
@@ -246,7 +250,7 @@ router.get('/api/shopify/products', async ({ query }) => {
     let i = 0;
     for (; i < page.nodes.length && nodes.length < first; i++) {
       after = page.nodes[i].cursor;
-      if (!(hideListed && fullyListed(page.nodes[i]))) nodes.push(page.nodes[i]);
+      if (!hidden(page.nodes[i])) nodes.push(page.nodes[i]);
     }
     hasNextPage = i < page.nodes.length || page.pageInfo.hasNextPage;
     if (nodes.length >= first || !page.pageInfo.hasNextPage) break;
