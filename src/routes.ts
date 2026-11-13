@@ -216,24 +216,35 @@ router.get('/api/ebay/aspects', async ({ query }) => ({ aspects: await ebay.getA
 // ============ Shopify ============
 
 router.get('/api/shopify/products', async ({ query }) => {
-  const page = await shopify.listProducts({
-    query: query.get('q') ?? undefined,
-    after: query.get('after'),
-    first: num(query.get('first'), 50),
-    sort: (query.get('sort') ?? 'title') as shopify.ProductSort,
-    inStock: query.get('inStock') === '1',
-  });
+  const first = Math.min(num(query.get('first'), 50), 50);
+  const hideListed = query.get('hideListed') === '1';
   const linked = new Map<string, { listing_id: number; status: string; linked_variants: number }>(
     all<{ shopify_product_id: string; listing_id: number; status: string; linked_variants: number }>(
       `SELECT l.shopify_product_id, MIN(l.id) AS listing_id, MIN(l.status) AS status, COUNT(i.id) AS linked_variants
        FROM ebay_listings l JOIN listing_items i ON i.listing_id = l.id GROUP BY l.shopify_product_id`,
     ).map((r) => [r.shopify_product_id, r]),
   );
+  const fullyListed = (p: shopify.ProductSummary) => (linked.get(p.id)?.linked_variants ?? 0) >= p.variantsCount.count;
+  // Listing status lives in this app, not Shopify, so hidden products are skipped here and more pages are
+  // read until the page is full; the cursor resumes right after the last product looked at.
+  const nodes: shopify.ProductSummary[] = [];
+  let after = query.get('after');
+  let hasNextPage = false;
+  for (let reads = 0; reads < 10; reads++) {
+    const page = await shopify.listProducts({ query: query.get('q') ?? undefined, after, first, sort: (query.get('sort') ?? 'title') as shopify.ProductSort, inStock: query.get('inStock') === '1' });
+    let i = 0;
+    for (; i < page.nodes.length && nodes.length < first; i++) {
+      after = page.nodes[i].cursor;
+      if (!(hideListed && fullyListed(page.nodes[i]))) nodes.push(page.nodes[i]);
+    }
+    hasNextPage = i < page.nodes.length || page.pageInfo.hasNextPage;
+    if (nodes.length >= first || !page.pageInfo.hasNextPage) break;
+  }
   const settings = getSettings();
   const overrides = new Map(listOverrides().map((o) => [o.product_id, o.mode]));
   return {
-    pageInfo: page.pageInfo,
-    products: page.nodes.map((p) => ({
+    pageInfo: { hasNextPage, endCursor: after },
+    products: nodes.map((p) => ({
       id: p.id,
       title: p.title,
       vendor: p.vendor,

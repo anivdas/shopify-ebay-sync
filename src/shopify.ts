@@ -144,6 +144,8 @@ export type ProductSummary = {
   featuredMedia: { preview: { image: { url: string } | null } | null } | null;
   tags: string[];
   collections: string[];
+  /** Pagination cursor of this product, so a page can resume right after it. */
+  cursor: string;
 };
 
 /** Lightweight product list (variants are loaded per product to stay under Shopify's query cost limit). */
@@ -160,22 +162,25 @@ export const productQuery = (text?: string, inStock?: boolean) => [text?.trim() 
 
 export async function listProducts(opts: { query?: string; after?: string | null; first?: number; sort?: ProductSort; inStock?: boolean }) {
   const sort = PRODUCT_SORTS[opts.sort ?? 'title'] ?? PRODUCT_SORTS.title;
-  const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: any[] } }>(
+  const data = await gql<{ products: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; edges: { cursor: string; node: any }[] } }>(
     `query ($first: Int!, $after: String, $query: String, $sortKey: ProductSortKeys!, $reverse: Boolean!) {
       products(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
         pageInfo { hasNextPage endCursor }
-        nodes {
-          id title vendor productType status totalInventory hasOnlyDefaultVariant tags
-          variantsCount { count }
-          priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
-          featuredMedia { preview { image { url } } }
-          collections(first: 5) { nodes { title } }
+        edges {
+          cursor
+          node {
+            id title vendor productType status totalInventory hasOnlyDefaultVariant tags
+            variantsCount { count }
+            priceRangeV2 { minVariantPrice { amount } maxVariantPrice { amount } }
+            featuredMedia { preview { image { url } } }
+            collections(first: 5) { nodes { title } }
+          }
         }
       }
     }`,
     { first: Math.min(opts.first ?? 50, 50), after: opts.after ?? null, query: productQuery(opts.query, opts.inStock), sortKey: sort.sortKey, reverse: sort.reverse },
   );
-  return { pageInfo: data.products.pageInfo, nodes: data.products.nodes.map(flattenCollections) as ProductSummary[] };
+  return { pageInfo: data.products.pageInfo, nodes: data.products.edges.map((e) => ({ ...flattenCollections(e.node), cursor: e.cursor })) as ProductSummary[] };
 }
 
 export type RuleScanProduct = { id: string; title: string; vendor: string; productType: string; status: string; tags: string[]; collections: string[] };

@@ -13,15 +13,17 @@ export function Products() {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [sort, setSort] = useState(() => localStorage.getItem('products.sort') ?? 'title');
   const [inStock, setInStock] = useState(() => localStorage.getItem('products.inStock') !== '0');
+  const [hideListed, setHideListed] = useState(() => localStorage.getItem('products.hideListed') === '1');
   const after = cursors[cursors.length - 1];
   const list = useApi(
-    `/api/shopify/products?first=50&sort=${sort}&inStock=${inStock ? 1 : 0}${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&after=${encodeURIComponent(after)}` : ''}`,
+    `/api/shopify/products?first=50&sort=${sort}&inStock=${inStock ? 1 : 0}&hideListed=${hideListed ? 1 : 0}${query ? `&q=${encodeURIComponent(query)}` : ''}${after ? `&after=${encodeURIComponent(after)}` : ''}`,
   );
   useEffect(() => {
     localStorage.setItem('products.sort', sort);
     localStorage.setItem('products.inStock', inStock ? '1' : '0');
+    localStorage.setItem('products.hideListed', hideListed ? '1' : '0');
     setCursors([null]);
-  }, [sort, inStock]);
+  }, [sort, inStock, hideListed]);
   const status = useApi('/api/status');
   const profiles = useApi('/api/profiles');
   const [selected, setSelected] = useState<Selection>({});
@@ -113,6 +115,10 @@ export function Products() {
           <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm" title="Hide products with no stock in Shopify (they can't be sold on eBay)">
             <input type="checkbox" className="size-4 accent-brand-500" checked={inStock} onChange={(e) => setInStock(e.target.checked)} />
             In stock only
+          </label>
+          <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm" title="Hide products whose variants are all on eBay already (partly listed products stay visible)">
+            <input type="checkbox" className="size-4 accent-brand-500" checked={hideListed} onChange={(e) => setHideListed(e.target.checked)} />
+            Hide listed
           </label>
           <select className="input w-auto shrink-0 py-2 text-sm" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort products">
             <option value="title">Sort: Title A-Z</option>
