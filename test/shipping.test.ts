@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { defaultSettings } from '../src/db.ts';
-import { estimateProfit, recommend } from '../src/pricing.ts';
-import { getBoxes, packageWeightAndSize, resolveBox, toOunces } from '../src/shipping.ts';
+
+// Own data folder: test files run in parallel and must not share a SQLite database.
+process.env.DATA_DIR = mkdtempSync(path.join(tmpdir(), 'ses-ship-'));
+const { defaultSettings } = await import('../src/db.ts');
+const { estimateProfit, recommend } = await import('../src/pricing.ts');
+const { getBoxes, packageWeightAndSize, resolveBox, toOunces } = await import('../src/shipping.ts');
 
 const settings = {
   ...defaultSettings,

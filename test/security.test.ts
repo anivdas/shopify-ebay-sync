@@ -4,8 +4,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { isPrivateAddress } from '../src/auth.ts';
-import { csvCell } from '../src/routes.ts';
+
+process.env.DATA_DIR = mkdtempSync(path.join(tmpdir(), 'ses-sec-local-'));
+const { isPrivateAddress } = await import('../src/auth.ts');
+const { csvCell } = await import('../src/routes.ts');
 
 const PORT = 18000 + Math.floor(Math.random() * 1000);
 const base = `http://127.0.0.1:${PORT}`;
