@@ -197,6 +197,7 @@ addColumn('listing_items', 'weight_unit', 'TEXT');
 addColumn('ebay_listings', 'excluded_reason', 'TEXT');
 addColumn('ebay_listings', 'auto_publish', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('ebay_listings', 'full_title', 'TEXT');
+addColumn('listing_items', 'markup_manual', 'INTEGER NOT NULL DEFAULT 0');
 db.exec(`CREATE TABLE IF NOT EXISTS product_overrides (
   product_id TEXT PRIMARY KEY,
   mode TEXT NOT NULL,

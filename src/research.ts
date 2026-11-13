@@ -110,7 +110,7 @@ export async function researchItem(item: Item) {
     basePrice: base,
     rules,
   });
-  if (settings.autoReprice && !item.price_locked) run('UPDATE listing_items SET markup_pct = ? WHERE id = ?', rec.pct, item.id);
+  if (settings.autoReprice && !item.price_locked && !item.markup_manual) run('UPDATE listing_items SET markup_pct = ? WHERE id = ?', rec.pct, item.id);
   if (rec.position === 'market_below_floor' && prevPosition !== 'market_below_floor') {
     logActivity('warn', 'alert.undercut', `Competitors now sell "${listing.title}" below your +${rules.minPct}% floor ($${rec.floor.toFixed(2)})`, {
       listingId: listing.id,

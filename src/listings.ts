@@ -13,7 +13,8 @@ import {
   stripHtml,
 } from './listing-builder.ts';
 import { logActivity } from './log.ts';
-import { bestOfferThresholds, effectiveBase, priceAtPct, type PricingRules } from './pricing.ts';
+import { HttpError } from './http.ts';
+import { bestOfferThresholds, effectiveBase, priceAtExactPct, priceAtPct, type PricingRules } from './pricing.ts';
 import { excludedReasonFor, profileFor, profileRules } from './rules.ts';
 import { getBoxes, packageWeightAndSize, resolveBox, toOunces } from './shipping.ts';
 
@@ -95,6 +96,8 @@ export type Item = {
   ebay_price: number | null;
   ebay_qty: number | null;
   markup_pct: number | null;
+  /** 1 when the seller typed the markup: it is used exactly and auto-reprice leaves it alone. */
+  markup_manual: number;
   price_locked: number;
   manual_price: number | null;
   held_price: number | null;
@@ -142,6 +145,7 @@ export function targetPrice(item: Item, rules: PricingRules, settings: Settings)
   if (item.shopify_price === null) return null;
   if (item.price_locked && item.manual_price) return item.manual_price;
   const base = effectiveBase(item.shopify_price, item.shopify_compare_at, settings.useShopifySalePrice);
+  if (item.markup_manual && item.markup_pct !== null) return priceAtExactPct(base, item.markup_pct, rules.charm);
   const pct = item.markup_pct ?? (rules.minPct + rules.maxPct) / 2;
   return priceAtPct(base, pct, rules);
 }
@@ -393,7 +397,11 @@ export function updateListing(id: number, patch: Record<string, unknown>) {
       if (!item) continue;
       if ('price_locked' in p) run('UPDATE listing_items SET price_locked = ? WHERE id = ?', p.price_locked ? 1 : 0, item.id);
       if ('manual_price' in p) run('UPDATE listing_items SET manual_price = ? WHERE id = ?', p.manual_price ? Number(p.manual_price) : null, item.id);
-      if ('markup_pct' in p && p.markup_pct !== null && p.markup_pct !== '') run('UPDATE listing_items SET markup_pct = ? WHERE id = ?', Number(p.markup_pct), item.id);
+      if ('markup_pct' in p) {
+        const pct = p.markup_pct === null || p.markup_pct === '' ? null : Number(p.markup_pct);
+        if (pct !== null && !(pct > -100 && pct <= 1000)) throw new HttpError(400, `Markup must be between -100% and 1000% (got ${p.markup_pct})`);
+        run('UPDATE listing_items SET markup_pct = ?, markup_manual = ? WHERE id = ?', pct, pct !== null && p.markup_manual !== false ? 1 : 0, item.id);
+      }
       if ('mpn' in p) run('UPDATE listing_items SET mpn = ? WHERE id = ?', p.mpn || null, item.id);
       if ('sku' in p && listing.status === 'draft' && p.sku) run('UPDATE listing_items SET sku = ? WHERE id = ?', String(p.sku).slice(0, 50), item.id);
     }
@@ -748,4 +756,4 @@ export const decodeListing = (l: Listing | Row) => ({
   shopify_url: shopify.adminProductUrl(l.shopify_product_id),
 });
 
-export const decodeItem = (i: Item | Row) => ({ ...i, options: json(i.options, {}), price_locked: !!i.price_locked, inventory_tracked: !!i.inventory_tracked });
+export const decodeItem = (i: Item | Row) => ({ ...i, options: json(i.options, {}), price_locked: !!i.price_locked, markup_manual: !!i.markup_manual, inventory_tracked: !!i.inventory_tracked });

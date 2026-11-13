@@ -233,9 +233,28 @@ export function ListingEditor({ id }: { id: number }) {
                         </td>
                         <td className="table-cell">
                           <div className="relative w-24">
-                            <input type="number" step={0.1} disabled={lockedPrice} className="input py-1 pr-6 text-sm" value={e.markup_pct ?? i.markup_pct ?? ''} placeholder="auto" onChange={(ev) => setItem(i.id, 'markup_pct', ev.target.value === '' ? null : Number(ev.target.value))} />
+                            <input type="number" step={0.1} disabled={lockedPrice} className="input py-1 pr-6 text-sm" value={'markup_pct' in e ? (e.markup_pct ?? '') : (i.markup_pct ?? '')} placeholder="auto" title="Your markup for this listing, used exactly (even outside the profile's range). Clear it to go back to automatic." onChange={(ev) => setItem(i.id, 'markup_pct', ev.target.value === '' ? null : Number(ev.target.value))} />
                             <span className="absolute top-1/2 right-2 -translate-y-1/2 text-xs text-zinc-400">%</span>
                           </div>
+                          {!lockedPrice && (
+                            <div className="mt-0.5 text-xs text-zinc-500">
+                              {'markup_pct' in e ? (
+                                e.markup_pct === null || i.base_price === null ? (
+                                  'auto after save'
+                                ) : (
+                                  <>≈ {money(i.base_price * (1 + e.markup_pct / 100), currency)} after save</>
+                                )
+                              ) : i.markup_manual ? (
+                                i.target_price < i.floor || i.target_price > i.ceiling ? (
+                                  <span className="text-amber-600 dark:text-amber-400" title="You set this markup, so it is used even though it is outside the profile's min/max range">yours, outside range</span>
+                                ) : (
+                                  <span title="You set this markup; auto-reprice leaves it alone. Clear the box to go back to automatic.">yours</span>
+                                )
+                              ) : (
+                                <span title="Picked within your min/max range; auto-reprice may change it. Type a % to set your own.">auto</span>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="table-cell">
                           <div className="flex items-center gap-1.5">

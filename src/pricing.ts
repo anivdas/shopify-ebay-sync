@@ -50,6 +50,12 @@ export function priceAtPct(base: number, pct: number, rules: PricingRules): numb
   return fromCents(rules.charm ? charmRound(target, floor, ceiling) : target);
 }
 
+/** Price for a markup % the seller chose on a listing: used as-is, outside the min/max range if need be. */
+export function priceAtExactPct(base: number, pct: number, charm: boolean): number {
+  const target = toCents(base * (1 + pct / 100));
+  return fromCents(charm ? charmRound(target, target - 99, target) : target);
+}
+
 /**
  * Picks an eBay price strictly between +minPct% and +maxPct% of the Shopify price,
  * positioned just under the cheapest identical brand-new competitor when possible.

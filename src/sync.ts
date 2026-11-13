@@ -76,7 +76,7 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
     const qty = listing.excluded_reason ? 0 : targetQuantity(item, settings);
     let price = targetPrice(item, rules, settings);
     if (price !== null && price !== item.ebay_price) {
-      const problem = guardPriceChange(item.ebay_price, price, settings.priceGuardPct);
+      const problem = item.price_locked && item.manual_price ? null : guardPriceChange(item.ebay_price, price, settings.priceGuardPct);
       if (problem) {
         if (item.held_price !== price) {
           run('UPDATE listing_items SET held_price = ?, held_reason = ? WHERE id = ?', price, problem, item.id);

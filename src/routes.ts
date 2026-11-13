@@ -522,7 +522,13 @@ router.post('/api/listings/bulk-action', async ({ body }) => {
   return { results };
 });
 
-router.put('/api/listings/:id', (ctx) => ({ listing: L.updateListing(id(ctx), ctx.body ?? {}) }));
+router.put('/api/listings/:id', (ctx) => {
+  const listing = L.updateListing(id(ctx), ctx.body ?? {});
+  // Price edits on a live listing go to eBay now instead of waiting for the next scheduled sync
+  if (ctx.body?.items && ['published', 'out_of_stock', 'paused'].includes(listing.status))
+    enqueue('sync', () => import('./sync.ts').then((m) => m.syncShopifyToEbay({ productIds: [listing.shopify_product_id] }))).catch(() => undefined);
+  return { listing };
+});
 router.post('/api/listings/:id/validate', async (ctx) => ({ issues: await L.validateListing(id(ctx)) }));
 router.post('/api/listings/:id/publish', async (ctx) => ({ listing: await enqueue('publish', () => L.publishListing(id(ctx))) }));
 router.post('/api/listings/:id/end', async (ctx) => (await enqueue('end', () => L.endListing(id(ctx))), { ok: true }));
@@ -538,7 +544,7 @@ function applySuggestion(itemId: number) {
   if (!item) throw new HttpError(404, 'Item not found');
   const snap = latestSnapshot(item.shopify_variant_id);
   if (!snap?.recommended_pct) throw new HttpError(400, 'No price suggestion yet. Run research first.');
-  L.updateListing(item.listing_id, { items: [{ id: item.id, markup_pct: snap.recommended_pct, price_locked: false }] });
+  L.updateListing(item.listing_id, { items: [{ id: item.id, markup_pct: snap.recommended_pct, markup_manual: false, price_locked: false }] });
   return snap.recommended_pct;
 }
 
