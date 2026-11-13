@@ -1,5 +1,7 @@
 #!/bin/sh
 set -e
+# Database, backups and secret.key are created readable only by the app user.
+umask 077
 
 # When started as root (the default), make sure the data folder belongs to PUID:PGID
 # and then drop privileges. This avoids "permission denied" on NAS shared folders.

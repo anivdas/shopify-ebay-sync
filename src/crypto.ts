@@ -17,19 +17,20 @@ export function decrypt(blob: string): string {
   return Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString('utf8');
 }
 
-const sign = (value: string) => createHmac('sha256', `session:${config.appSecret}`).update(value).digest('base64url');
+/** `scope` ties sessions to the current password + session epoch, so changing either revokes every session. */
+const sign = (value: string, scope: string) => createHmac('sha256', `session:${config.appSecret}:${scope}`).update(value).digest('base64url');
 
-export function createSession(ttlMs: number): string {
+export function createSession(ttlMs: number, scope = ''): string {
   const payload = `${Date.now() + ttlMs}.${randomBytes(9).toString('base64url')}`;
-  return `${payload}.${sign(payload)}`;
+  return `${payload}.${sign(payload, scope)}`;
 }
 
-export function verifySession(token: string | undefined): boolean {
+export function verifySession(token: string | undefined, scope = ''): boolean {
   if (!token) return false;
   const idx = token.lastIndexOf('.');
   if (idx < 0) return false;
   const payload = token.slice(0, idx);
-  const expected = Buffer.from(sign(payload));
+  const expected = Buffer.from(sign(payload, scope));
   const actual = Buffer.from(token.slice(idx + 1));
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return false;
   return Number(payload.split('.')[0]) > Date.now();

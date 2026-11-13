@@ -1092,6 +1092,13 @@ export function SecuritySection() {
       <Button variant="primary" loading={busy === 'pw'} onClick={() => run('pw', () => post('/api/password', form).then(() => setForm({ current: '', password: '' })), 'Password changed')}>
         Change password
       </Button>
+      <p className="text-xs text-zinc-500">Changing the password signs out every other device.</p>
+      <div className="border-t border-zinc-200 pt-4 dark:border-white/10">
+        <Button loading={busy === 'revoke'} onClick={() => run('revoke', () => post('/api/sessions/revoke'), 'Signed out all other devices')}>
+          Sign out all other devices
+        </Button>
+        <p className="mt-1 text-xs text-zinc-500">Use this if you signed in on a computer or phone you no longer use.</p>
+      </div>
     </div>
   );
 }

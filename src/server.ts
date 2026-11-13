@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkPassword, loginAllowed, passwordIsSet, recordLogin, setPassword } from './auth.ts';
+import { checkPassword, isPrivateAddress, loginAllowed, passwordIsSet, recordLogin, revokeAllSessions, sessionScope, setPassword } from './auth.ts';
 import { config } from './config.ts';
 import { createSession, verifySession } from './crypto.ts';
 import { db } from './db.ts';
@@ -25,21 +26,48 @@ const MIME: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 
+const newSession = () => sessionCookie(createSession(SESSION_TTL, sessionScope()), SESSION_TTL);
+const isAuthed = (req: import('node:http').IncomingMessage) => verifySession(parseCookies(req.headers.cookie).sid, sessionScope());
+
+/** CSP allowing only our own scripts, plus the hash of the inline theme script in index.html. */
+function contentSecurityPolicy(): string {
+  const index = path.join(webRoot, 'index.html');
+  const inline = existsSync(index)
+    ? [...readFileSync(index, 'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => `'sha256-${createHash('sha256').update(m[1]).digest('base64')}'`)
+    : [];
+  return [
+    "default-src 'self'",
+    `script-src 'self' ${inline.join(' ')}`.trim(),
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' https: data:",
+    "connect-src 'self'",
+    "frame-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; ');
+}
+const CSP = contentSecurityPolicy();
+
 const sessionCookie = (value: string, maxAge: number) =>
   `sid=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(maxAge / 1000)}${config.cookieSecure ? '; Secure' : ''}`;
 
 router.get('/healthz', () => ({ ok: true, version: config.version }), { public: true });
 
 router.get('/api/session', ({ req }) => ({
-  authenticated: verifySession(parseCookies(req.headers.cookie).sid),
+  authenticated: isAuthed(req),
   needsPassword: !passwordIsSet(),
   version: config.version,
 }), { public: true });
 
-router.post('/api/setup/password', ({ body, res }) => {
+router.post('/api/setup/password', ({ body, res, req }) => {
   if (passwordIsSet()) throw new HttpError(409, 'A password is already set');
+  // Until a password exists anyone who can reach the app could claim it, so only allow this from the LAN/VPN.
+  if (!isPrivateAddress(req.socket.remoteAddress) && process.env.ALLOW_REMOTE_SETUP !== 'true')
+    throw new HttpError(403, 'Set the first password from your local network (or set APP_PASSWORD, or ALLOW_REMOTE_SETUP=true).');
   setPassword(String(body?.password ?? ''));
-  res.setHeader('Set-Cookie', sessionCookie(createSession(SESSION_TTL), SESSION_TTL));
+  res.setHeader('Set-Cookie', newSession());
   logActivity('info', 'auth', 'Admin password created');
   return { ok: true };
 }, { public: true });
@@ -49,7 +77,7 @@ router.post('/api/login', ({ body, res, ip }) => {
   const ok = checkPassword(String(body?.password ?? ''));
   recordLogin(ip, ok);
   if (!ok) throw new HttpError(401, 'Wrong password');
-  res.setHeader('Set-Cookie', sessionCookie(createSession(SESSION_TTL), SESSION_TTL));
+  res.setHeader('Set-Cookie', newSession());
   return { ok: true };
 }, { public: true });
 
@@ -58,10 +86,20 @@ router.post('/api/logout', ({ res }) => {
   return { ok: true };
 }, { public: true });
 
-router.post('/api/password', ({ body }) => {
+router.post('/api/password', ({ body, res }) => {
   if (config.envPassword) throw new HttpError(400, 'The password is set by the APP_PASSWORD environment variable');
   if (!checkPassword(String(body?.current ?? ''))) throw new HttpError(401, 'Current password is wrong');
   setPassword(String(body?.password ?? ''));
+  // The new password changes the session scope: every other device is signed out; keep this one signed in.
+  res.setHeader('Set-Cookie', newSession());
+  logActivity('info', 'auth', 'Password changed; other sessions signed out');
+  return { ok: true };
+});
+
+router.post('/api/sessions/revoke', ({ res }) => {
+  revokeAllSessions();
+  res.setHeader('Set-Cookie', newSession());
+  logActivity('info', 'auth', 'Signed out all other devices');
   return { ok: true };
 });
 
@@ -86,6 +124,11 @@ const server = createServer(async (req, res) => {
   const method = req.method ?? 'GET';
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  if (config.cookieSecure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   try {
     const match = router.match(method, url.pathname);
     if (!match) {
@@ -98,8 +141,7 @@ const server = createServer(async (req, res) => {
       throw new HttpError(404, 'Not found');
     }
     if (!match.route.public) {
-      const authed = verifySession(parseCookies(req.headers.cookie).sid);
-      if (!authed) {
+      if (!isAuthed(req)) {
         if (method === 'GET' && !url.pathname.startsWith('/api/')) {
           res.writeHead(302, { Location: '/' });
           res.end();
@@ -127,8 +169,9 @@ const server = createServer(async (req, res) => {
       query: url.searchParams,
       body,
       rawBody,
+      // Behind a proxy, use the address the proxy saw: the LAST X-Forwarded-For entry (earlier ones are client-supplied).
       ip:
-        (config.trustProxy && ((req.headers['cf-connecting-ip'] as string) || String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim())) ||
+        (config.trustProxy && ((req.headers['cf-connecting-ip'] as string) || String(req.headers['x-forwarded-for'] ?? '').split(',').pop()?.trim())) ||
         req.socket.remoteAddress ||
         'unknown',
     };

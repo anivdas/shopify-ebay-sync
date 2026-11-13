@@ -11,4 +11,6 @@ instead. You'll get a reply as soon as possible.
 - Never share your `data/` folder. It contains your encrypted API keys and `secret.key`.
 - Don't forward port 8080 on your router. For remote access, use a VPN (e.g. Tailscale) or a Cloudflare Tunnel (see the README).
 - Use a strong dashboard password and keep the app updated.
+- Set the first password right after installing. Until then, setup is only accepted from private networks (LAN, VPN, Docker); `ALLOW_REMOTE_SETUP=true` lifts that.
+- Lost a device or shared a session? **Settings → Security → Sign out all other devices**. Changing the password also signs out every other device.
 - If you think a key leaked, rotate it: regenerate the Shopify client secret in the Dev Dashboard and the eBay Cert ID in the eBay developer portal, then paste the new values in Settings → Connections.

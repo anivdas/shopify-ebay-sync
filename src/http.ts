@@ -47,7 +47,12 @@ export class Router {
     for (const r of this.routes) {
       if (r.method !== method) continue;
       const m = r.pattern.exec(path);
-      if (m) return { route: r, params: Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])) };
+      if (!m) continue;
+      try {
+        return { route: r, params: Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])) };
+      } catch {
+        throw new HttpError(400, 'Malformed URL');
+      }
     }
     return null;
   }
@@ -70,7 +75,13 @@ export function parseCookies(header: string | undefined): Record<string, string>
       .split(';')
       .map((c) => c.trim().split('='))
       .filter((p) => p.length === 2)
-      .map(([k, v]) => [k, decodeURIComponent(v)]),
+      .map(([k, v]) => {
+        try {
+          return [k, decodeURIComponent(v)];
+        } catch {
+          return [k, ''];
+        }
+      }),
   );
 }
 

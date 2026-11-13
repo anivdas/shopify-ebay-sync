@@ -18,6 +18,15 @@ import { approveHeldPrice, staleListings } from './sync.ts';
 
 export const router = new Router();
 const oauthStates = new Map<string, number>();
+const OAUTH_STATE_TTL = 30 * 60_000;
+
+/** CSV cell: quoted when needed; cells a spreadsheet would run as a formula (=, +, -, @) are neutralised. */
+export const csvCell = (v: unknown) => {
+  if (v === null || v === undefined) return '';
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
 const REQUIRED_SHOPIFY_SCOPES = ['write_products', 'read_inventory', 'write_inventory', 'read_locations'];
 
 const id = (ctx: Ctx) => {
@@ -138,6 +147,7 @@ router.post('/api/credentials/test', async ({ body }) => {
 router.get('/api/ebay/connect-url', () => {
   if (!ebayConfigured()) throw new HttpError(400, 'Add your eBay developer keys first');
   const state = randomBytes(16).toString('hex');
+  for (const [s, at] of oauthStates) if (Date.now() - at > OAUTH_STATE_TTL) oauthStates.delete(s);
   oauthStates.set(state, Date.now());
   return { url: ebay.authUrl(state) };
 });
@@ -152,7 +162,8 @@ router.get('/auth/ebay/callback', async ({ query, res }) => {
   const code = query.get('code');
   const state = query.get('state') ?? '';
   if (!code) throw new HttpError(400, `eBay did not return an authorization code${query.get('error') ? `: ${query.get('error')}` : ''}`);
-  if (!oauthStates.has(state)) throw new HttpError(400, 'This eBay login link has expired. Start again from Settings.');
+  const issued = oauthStates.get(state);
+  if (!issued || Date.now() - issued > OAUTH_STATE_TTL) throw new HttpError(400, 'This eBay login link has expired. Start again from Settings.');
   oauthStates.delete(state);
   await finishEbayConnect(code);
   res.writeHead(302, { Location: '/setup?ebay=connected' });
@@ -631,8 +642,7 @@ router.get('/api/export/listings.csv', ({ res }) => {
      FROM listing_items i JOIN ebay_listings l ON l.id = i.listing_id ORDER BY l.title`,
   );
   const header = ['title', 'status', 'ebay_listing_id', 'sku', 'variant', 'shopify_price', 'ebay_price', 'markup_pct', 'shopify_qty', 'ebay_qty', 'unit_cost'];
-  const esc = (v: unknown) => (v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-  const csv = [header.join(','), ...rows.map((r) => Object.values(r).map(esc).join(','))].join('\n');
+  const csv = [header.join(','), ...rows.map((r) => Object.values(r).map(csvCell).join(','))].join('\n');
   res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="ebay-listings.csv"' });
   res.end(csv);
   return undefined;
