@@ -1,7 +1,17 @@
-import { Barcode, CheckCircle2, ScanLine, Search, Stethoscope, Undo2, Wand2 } from 'lucide-react';
+import { Barcode, CheckCircle2, Package, ScanLine, Search, Stethoscope, Undo2, Wand2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { ago, post, useApi } from '../api.ts';
-import { Badge, Button, Callout, Card, cx, Empty, Modal, PageHeader, Spinner, useAction, useConfirm } from '../ui.tsx';
+import { Badge, Button, Callout, Card, cx, Empty, Link, Modal, PageHeader, Spinner, useAction, useConfirm } from '../ui.tsx';
+import { boxSize, boxVolume, fmtWeight, useBoxes } from './Listings.tsx';
+
+const SORTS: Record<string, (a: any, b: any) => number> = {
+  default: () => 0,
+  title: (a, b) => a.productTitle.localeCompare(b.productTitle),
+  heavy: (a, b) => (b.weightOz ?? 0) - (a.weightOz ?? 0),
+  light: (a, b) => (a.weightOz ?? Infinity) - (b.weightOz ?? Infinity),
+  big: (a, b) => boxVolume(b.listing?.box) - boxVolume(a.listing?.box),
+  small: (a, b) => (a.listing?.box ? boxVolume(a.listing.box) : Infinity) - (b.listing?.box ? boxVolume(b.listing.box) : Infinity),
+};
 
 const SEV_COLOR = { high: 'red', medium: 'amber', low: 'gray' } as const;
 
@@ -15,6 +25,9 @@ export function Catalog() {
   const [edits, setEdits] = useState<Record<string, { barcode?: string; cost?: string; country?: string }>>({});
   const [fillCountry, setFillCountry] = useState('');
   const [skuOpen, setSkuOpen] = useState(false);
+  const [sort, setSort] = useState(() => localStorage.getItem('catalog.sort') ?? 'default');
+  const [boxTo, setBoxTo] = useState('');
+  const boxes = useBoxes();
   const d = q.data;
   const issues = d?.issues ?? {};
 
@@ -27,8 +40,29 @@ export function Catalog() {
       if (filter === 'all') return true;
       if (filter === 'problems') return r.issues.some((i: string) => issues[i]?.severity !== 'low');
       return r.issues.includes(filter);
-    });
-  }, [d, filter, search]);
+    }).sort(SORTS[sort] ?? SORTS.default);
+  }, [d, filter, search, sort]);
+  const shownListings = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of rows) if (r.listing && r.listing.status !== 'ended') m.set(r.listing.listingId, r.listing.status);
+    return m;
+  }, [rows]);
+  const setBoxForShown = async () => {
+    const ids = [...shownListings.keys()];
+    const live = [...shownListings.values()].filter((s) => s !== 'draft').length;
+    const name = boxes.find((b) => b.id === boxTo)?.name ?? 'the profile / default box';
+    if (!(await confirm({ title: `Use ${name} for ${ids.length} eBay listing(s)?`, body: live ? `${live} of them are live and will be updated on eBay now.` : 'They are drafts, so nothing changes on eBay until you publish.', confirm: 'Set box' }))) return;
+    await run(
+      'set-box',
+      async () => {
+        const r = await post('/api/listings/bulk-action', { ids, action: 'set-box', boxId: boxTo || null });
+        q.setData(await post('/api/catalog/scan'));
+        const failed = r.results.filter((x: any) => !x.ok);
+        if (failed.length) throw new Error(`${ids.length - failed.length} updated, ${failed.length} failed: ${failed[0].error}`);
+      },
+      `Box set on ${ids.length} listing(s)`,
+    );
+  };
 
   const editCount = Object.keys(edits).length;
   const saveEdits = () =>
@@ -186,6 +220,40 @@ export function Catalog() {
                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-400" />
                 <input className="input pl-9" placeholder="Filter by title, SKU, barcode or brand" value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                <select
+                  className="input w-auto py-1 text-xs"
+                  aria-label="Sort variants"
+                  value={sort}
+                  onChange={(e) => {
+                    setSort(e.target.value);
+                    localStorage.setItem('catalog.sort', e.target.value);
+                  }}
+                >
+                  <option value="default">Sort: Shopify order</option>
+                  <option value="title">Sort: Title A-Z</option>
+                  <option value="heavy">Sort: Heaviest</option>
+                  <option value="light">Sort: Lightest</option>
+                  <option value="big">Sort: Largest eBay box</option>
+                  <option value="small">Sort: Smallest eBay box</option>
+                </select>
+                {shownListings.size > 0 && (
+                  <>
+                    <span className="ml-2">Set the eBay box for the {shownListings.size} listing(s) behind the variants shown:</span>
+                    <select className="input w-auto py-1 text-xs" aria-label="Box" value={boxTo} onChange={(e) => setBoxTo(e.target.value)}>
+                      <option value="">Profile / default box</option>
+                      {boxes.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({boxSize(b)})
+                        </option>
+                      ))}
+                    </select>
+                    <Button className="px-2 py-1 text-xs" loading={busy === 'set-box'} onClick={setBoxForShown}>
+                      <Package className="size-3.5" /> Set box
+                    </Button>
+                  </>
+                )}
+              </div>
               {filter === 'no_country' && rows.length > 0 && (
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                   <span>Set country of origin for the {rows.length} variant(s) shown:</span>
@@ -205,7 +273,7 @@ export function Catalog() {
               <Empty icon={<CheckCircle2 className="size-6" />} title="Nothing to fix here" description="Every variant in this view looks good." />
             ) : (
               <div className="scrollbar-thin overflow-x-auto">
-                <table className="w-full min-w-[900px]">
+                <table className="w-full min-w-[1100px]">
                   <thead className="border-b border-zinc-100 dark:border-white/[0.06]">
                     <tr>
                       <th className="table-head">Product</th>
@@ -213,6 +281,8 @@ export function Catalog() {
                       <th className="table-head">UPC / EAN</th>
                       <th className="table-head">Cost</th>
                       <th className="table-head" title="Country of origin (2-letter code)">Origin</th>
+                      <th className="table-head" title="Shopify variant weight (product > Shipping > Weight)">Weight</th>
+                      <th className="table-head" title="Box used on eBay for calculated shipping (listed variants only)">eBay box</th>
                       <th className="table-head">Issues</th>
                     </tr>
                   </thead>
@@ -260,6 +330,23 @@ export function Catalog() {
                               value={e.country ?? (r.country ?? '')}
                               onChange={(ev) => setE('country', ev.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
                             />
+                          </td>
+                          <td className="table-cell text-xs tabular-nums">{r.weightOz ? fmtWeight(r.weightOz) : <span className="text-amber-600">none</span>}</td>
+                          <td className="table-cell text-xs">
+                            {r.listing ? (
+                              <Link to={`/listings/${r.listing.listingId}`} className="hover:text-brand-600">
+                                {r.listing.box ? (
+                                  <>
+                                    <div>{r.listing.box.name}</div>
+                                    <div className="text-zinc-500">{boxSize(r.listing.box)}</div>
+                                  </>
+                                ) : (
+                                  <span className="text-amber-600">no box</span>
+                                )}
+                              </Link>
+                            ) : (
+                              <span className="text-zinc-400">not listed</span>
+                            )}
                           </td>
                           <td className="table-cell">
                             <div className="flex flex-wrap gap-1">

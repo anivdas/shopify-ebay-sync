@@ -13,6 +13,7 @@ import * as L from './listings.ts';
 import { logActivity, sendAlert } from './log.ts';
 import { effectiveBase, estimateProfit, recommend } from './pricing.ts';
 import { latestSnapshot, researchItem, researchVariant, snapshotHistory } from './research.ts';
+import { getBoxes, resolveBox, type Box } from './shipping.ts';
 import * as shopify from './shopify.ts';
 import { approveHeldPrice, staleListings } from './sync.ts';
 
@@ -381,8 +382,28 @@ router.post(
 
 // ============ Catalog health (Shopify data quality) ============
 
-const catalogResponse = (scan: { at: string; rows: catalog.CatalogRow[] } | null) =>
-  scan ? { at: scan.at, summary: catalog.summarize(scan.rows), rows: scan.rows, issues: catalog.ISSUE_INFO, undo: catalog.lastUndo() } : { at: null, issues: catalog.ISSUE_INFO, undo: catalog.lastUndo() };
+/** The eBay listing (and the box it ships in) for each listed variant; ended listings only count if nothing newer exists. */
+function listedPackages() {
+  const settings = getSettings();
+  const rows = all<{ variant_id: string; id: number; status: string; box_id: string | null; profile_id: number | null }>(
+    `SELECT i.shopify_variant_id AS variant_id, l.id, l.status, l.box_id, l.profile_id FROM listing_items i JOIN ebay_listings l ON l.id = i.listing_id
+     ORDER BY (l.status = 'ended') DESC, l.id`,
+  );
+  const profileBox = new Map<number, string | null>();
+  const out = new Map<string, { listingId: number; status: string; box: Box | null }>();
+  for (const r of rows) {
+    if (r.profile_id && !profileBox.has(r.profile_id)) profileBox.set(r.profile_id, L.getProfile(r.profile_id)?.box_id ?? null);
+    out.set(r.variant_id, { listingId: r.id, status: r.status, box: resolveBox(settings, r.box_id, r.profile_id ? profileBox.get(r.profile_id) : null) });
+  }
+  return out;
+}
+
+const catalogResponse = (scan: { at: string; rows: catalog.CatalogRow[] } | null) => {
+  if (!scan) return { at: null, issues: catalog.ISSUE_INFO, undo: catalog.lastUndo() };
+  const listed = listedPackages();
+  const rows = scan.rows.map((r) => ({ ...r, listing: listed.get(r.variantId) ?? null }));
+  return { at: scan.at, summary: catalog.summarize(scan.rows), rows, issues: catalog.ISSUE_INFO, undo: catalog.lastUndo() };
+};
 
 router.get('/api/catalog', () => catalogResponse(catalog.cachedScan()));
 router.post('/api/catalog/scan', async () => catalogResponse(await catalog.scanCatalog()));
@@ -459,7 +480,10 @@ router.get('/api/listings', ({ query }) => {
   const rows = all<L.Listing>(`SELECT * FROM ebay_listings l ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY l.updated_at DESC`, ...params);
   const staleIds = new Set(staleListings().map((l) => l.id));
   return {
-    listings: rows.map((l) => ({ ...L.decodeListing(l), stale: staleIds.has(l.id), items: L.getItems(l.id).map((i) => enrichItem(i, l)) })),
+    listings: rows.map((l) => {
+      const pkg = L.listingPackage(l);
+      return { ...L.decodeListing(l), stale: staleIds.has(l.id), box: pkg.box, items: L.getItems(l.id).map((i) => ({ ...enrichItem(i, l), ...pkg.item(i) })) };
+    }),
   };
 });
 
@@ -504,10 +528,16 @@ router.post('/api/listings/bulk', async ({ body }) => {
 router.post('/api/listings/bulk-action', async ({ body }) => {
   const ids: number[] = (body?.ids ?? []).map(Number);
   const action = String(body?.action);
+  const boxId = body?.boxId ? String(body.boxId) : null;
+  if (action === 'set-box' && boxId && !getBoxes(getSettings()).some((b) => b.id === boxId)) throw new HttpError(400, 'Unknown box');
   const results: { id: number; ok: boolean; error?: string }[] = [];
   for (const lid of ids) {
     try {
-      if (action === 'publish') await L.publishListing(lid);
+      if (action === 'set-box') {
+        // Live listings are re-sent so eBay's calculated shipping uses the new package right away
+        const listing = L.updateListing(lid, { box_id: boxId });
+        if (['published', 'out_of_stock', 'paused', 'error'].includes(listing.status) && listing.ebay_listing_id) await L.publishListing(lid);
+      } else if (action === 'publish') await L.publishListing(lid);
       else if (action === 'end') await L.endListing(lid);
       else if (action === 'refresh') await L.refreshFromShopify(lid);
       else if (action === 'research') for (const item of L.getItems(lid)) await researchItem(item);

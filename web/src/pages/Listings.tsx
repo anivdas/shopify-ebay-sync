@@ -1,8 +1,24 @@
-import { Boxes, Check, ExternalLink, Hourglass, Layers, RefreshCw, Search, ShieldAlert, Sparkles, Wand2 } from 'lucide-react';
+import { Boxes, Check, ExternalLink, Hourglass, Layers, Package, RefreshCw, Search, ShieldAlert, Sparkles, Wand2 } from 'lucide-react';
 import { Fragment, useMemo, useState } from 'react';
 import { money, pct, post, useApi } from '../api.ts';
 import { Badge, Button, Card, cx, Empty, Link, PageHeader, Spinner, StatusBadge, Tabs, useAction, useConfirm, useRouter } from '../ui.tsx';
 import { SuggestionCell } from './Market.tsx';
+
+type ShipBox = { id: string; name: string; length: number; width: number; height: number; unit: string };
+export const boxVolume = (b: ShipBox | null | undefined) => (b ? (b.length * b.width * b.height) / (b.unit === 'CENTIMETER' ? 16.387 : 1) : 0);
+export const boxSize = (b: ShipBox) => `${b.length}×${b.width}×${b.height} ${b.unit === 'CENTIMETER' ? 'cm' : 'in'}`;
+export const fmtWeight = (oz: number) => (oz < 16 ? `${+oz.toFixed(1)} oz` : `${+(oz / 16).toFixed(2)} lb`);
+export const useBoxes = () => JSON.parse(useApi('/api/settings').data?.settings?.shippingBoxes || '[]') as ShipBox[];
+/** Heaviest package in the listing, in lb (includes the empty box weight, like eBay gets it). */
+const listingLb = (l: any) => Math.max(0, ...l.items.map((i: any) => i.package?.weight?.value ?? (i.product_oz ?? 0) / 16));
+const SORTS: Record<string, (a: any, b: any) => number> = {
+  updated: () => 0,
+  title: (a, b) => a.title.localeCompare(b.title),
+  heavy: (a, b) => listingLb(b) - listingLb(a),
+  light: (a, b) => listingLb(a) - listingLb(b),
+  big: (a, b) => boxVolume(b.box) - boxVolume(a.box),
+  small: (a, b) => boxVolume(a.box) - boxVolume(b.box),
+};
 
 type Filter = 'all' | 'published' | 'out_of_stock' | 'draft' | 'error' | 'ended' | 'held' | 'below' | 'stale';
 
@@ -14,6 +30,9 @@ export function Listings() {
   const list = useApi('/api/listings', { refreshMs: 60_000 });
   const status = useApi('/api/status');
   const [sel, setSel] = useState<Set<number>>(new Set());
+  const [sort, setSort] = useState(() => localStorage.getItem('listings.sort') ?? 'updated');
+  const [setBoxTo, setSetBoxTo] = useState('');
+  const boxes = useBoxes();
   const { busy, run } = useAction();
   const confirm = useConfirm();
   const currency = status.data?.ebay?.currency ?? 'USD';
@@ -28,17 +47,19 @@ export function Listings() {
       if (filter === 'below') return l.items.some((i: any) => i.market?.position === 'market_below_floor');
       if (filter === 'stale') return l.stale;
       return l.status === filter;
-    });
-  }, [all, filter, q]);
+    }).sort(SORTS[sort] ?? SORTS.updated);
+  }, [all, filter, q, sort]);
 
   const count = (f: (l: any) => boolean) => all.filter(f).length;
-  const bulk = async (action: string, label: string) => {
+  const bulk = async (action: string, label: string, extra: Record<string, unknown> = {}) => {
     const ids = [...sel];
+    const live = all.filter((l) => sel.has(l.id) && l.ebay_listing_id && l.status !== 'ended' && l.status !== 'draft').length;
+    if (action === 'set-box' && live && !(await confirm({ title: `Change the box on ${ids.length} listing(s)?`, body: `${live} of them are live and will be updated on eBay now, so buyers see shipping for the new package.`, confirm: 'Change box' }))) return;
     if (['end', 'delete'].includes(action) && !(await confirm({ title: `${label} ${ids.length} listing(s)?`, body: action === 'end' ? 'They will be removed from eBay. You can republish later.' : 'They will be removed from this app.', confirm: label, danger: true }))) return;
     await run(
       action,
       async () => {
-        const r = await post('/api/listings/bulk-action', { ids, action });
+        const r = await post('/api/listings/bulk-action', { ids, action, ...extra });
         list.reload();
         const failed = r.results.filter((x: any) => !x.ok);
         if (failed.length) throw new Error(`${ids.length - failed.length} done, ${failed.length} failed: ${failed[0].error}`);
@@ -82,6 +103,22 @@ export function Listings() {
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-zinc-400" />
           <input className="input pl-9" placeholder="Search title or SKU" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        <select
+          className="input w-auto py-2 text-sm"
+          aria-label="Sort listings"
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value);
+            localStorage.setItem('listings.sort', e.target.value);
+          }}
+        >
+          <option value="updated">Sort: Recently updated</option>
+          <option value="title">Sort: Title A-Z</option>
+          <option value="heavy">Sort: Heaviest package</option>
+          <option value="light">Sort: Lightest package</option>
+          <option value="big">Sort: Largest box</option>
+          <option value="small">Sort: Smallest box</option>
+        </select>
       </div>
 
       {sel.size > 0 && (
@@ -91,6 +128,19 @@ export function Listings() {
           <Button loading={busy === 'research'} onClick={() => bulk('research', 'Research prices')}>Research prices</Button>
           <Button loading={busy === 'apply-suggestions'} onClick={() => bulk('apply-suggestions', 'Apply suggestions')}>Apply suggestions</Button>
           <Button loading={busy === 'refresh'} onClick={() => bulk('refresh', 'Refresh from Shopify')}>Refresh from Shopify</Button>
+          <span className="flex items-center gap-1.5">
+            <select className="input w-auto py-1.5 text-sm" aria-label="Box for selected listings" value={setBoxTo} onChange={(e) => setSetBoxTo(e.target.value)}>
+              <option value="">Box: profile / default</option>
+              {boxes.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} ({boxSize(b)})
+                </option>
+              ))}
+            </select>
+            <Button loading={busy === 'set-box'} onClick={() => bulk('set-box', 'Set box', { boxId: setBoxTo || null })} title="Use this box for the selected listings; live ones are updated on eBay">
+              <Package className="size-4" /> Set box
+            </Button>
+          </span>
           <Button loading={busy === 'end'} onClick={() => bulk('end', 'End')}>End on eBay</Button>
           <Button variant="ghost" loading={busy === 'delete'} onClick={() => bulk('delete', 'Delete')}>Delete</Button>
           <Button variant="ghost" className="ml-auto" onClick={() => setSel(new Set())}>Clear</Button>
@@ -116,6 +166,7 @@ export function Listings() {
                   <th className="table-head">Shopify</th>
                   <th className="table-head">eBay price</th>
                   <th className="table-head">Stock</th>
+                  <th className="table-head" title="Box and weight sent to eBay for calculated shipping (Shopify weight + empty box)">Package</th>
                   <th className="table-head">Est. profit</th>
                   <th className="table-head min-w-[220px]">Suggestion</th>
                   <th className="table-head" />
@@ -195,6 +246,10 @@ function ItemRow({ l, i, first, span, selected, currency, onSelect, onChanged }:
         </div>
         <div className="text-xs text-zinc-500">{i.inventory_tracked ? `${i.shopify_qty ?? 0} in Shopify` : 'not tracked'}</div>
         {i.sold_30d > 0 && <div className="text-xs text-emerald-600">{i.sold_30d} sold / 30d</div>}
+      </td>
+      <td className="table-cell text-sm">
+        {i.package?.weight ? <div className="tabular-nums">{i.package.weight.value} lb</div> : <div className="text-xs text-rose-500" title="Add the weight in Shopify (product > Shipping > Weight), then Refresh from Shopify">no weight</div>}
+        <div className="text-xs text-zinc-500">{l.box ? `${l.box.name} · ${boxSize(l.box)}` : 'no box'}</div>
       </td>
       <td className="table-cell">
         {i.profit ? (

@@ -1,5 +1,6 @@
 import { getSettings, getState, setState } from './db.ts';
 import { logActivity } from './log.ts';
+import { toOunces } from './shipping.ts';
 import * as shopify from './shopify.ts';
 import { generateSku, isUsableSku, uniquify } from './sku.ts';
 
@@ -32,6 +33,8 @@ export type CatalogRow = {
   tracked: boolean;
   cost: number | null;
   country: string | null;
+  /** Shopify variant weight in ounces (null when not set). */
+  weightOz: number | null;
   qty: number | null;
   options: { name: string; value: string }[];
   image: string | null;
@@ -66,6 +69,7 @@ export async function scanCatalog(): Promise<{ at: string; rows: CatalogRow[] }>
         tracked: v.inventoryItem.tracked,
         cost: v.inventoryItem.unitCost ? Number(v.inventoryItem.unitCost.amount) : null,
         country: v.inventoryItem.countryCodeOfOrigin ?? null,
+        weightOz: toOunces(v.inventoryItem.measurement?.weight?.value, v.inventoryItem.measurement?.weight?.unit) || null,
         qty: v.inventoryQuantity,
         options: v.selectedOptions.filter((o) => o.value !== 'Default Title'),
         image: img?.url ?? null,
