@@ -10,6 +10,8 @@ import {
   optionsLabel,
   renderDescription,
   renderTitle,
+  findOffsiteLinks,
+  removeOffsiteLinks,
   stripHtml,
 } from './listing-builder.ts';
 import { logActivity } from './log.ts';
@@ -504,6 +506,8 @@ export async function validateListing(id: number): Promise<Issue[]> {
   if (!images.length) err('image_urls', 'At least one image is required');
   if (images.some((u) => !u.startsWith('https://'))) err('image_urls', 'All image URLs must use https');
   if (!listing.description_html.trim()) warn('description_html', 'Description is empty');
+  const links = findOffsiteLinks(listing.description_html);
+  if (links.length) warn('description_html', `eBay doesn't allow links or emails in descriptions, so these are removed when sent: ${links.slice(0, 5).join(', ')}${links.length > 5 ? ` (+${links.length - 5} more)` : ''}`);
   if (!items.length) err('items', 'Listing has no variants');
 
   const aspects = json<Record<string, string[]>>(listing.aspects, {});
@@ -577,7 +581,7 @@ function inventoryPayload(listing: Listing, item: Item, qty: number, settings: S
     ...(pkg ? { packageWeightAndSize: pkg } : {}),
     product: {
       title: listing.title,
-      description: stripHtml(listing.description_html).slice(0, 3990),
+      description: stripHtml(removeOffsiteLinks(listing.description_html)).slice(0, 3990),
       aspects: cleanAspects(aspects),
       imageUrls: itemImages as string[],
       brand,
@@ -607,7 +611,7 @@ export function offerPayload(listing: Listing, item: Item, price: number, qty: n
       returnPolicyId: (listing.return_policy_id || settings.returnPolicyId)!,
     },
   };
-  if (listing.kind === 'single') offer.listingDescription = listing.description_html;
+  if (listing.kind === 'single') offer.listingDescription = removeOffsiteLinks(listing.description_html);
   if (listing.kind === 'single' && listing.best_offer_enabled && item.shopify_price) {
     const base = effectiveBase(item.shopify_price, item.shopify_compare_at, settings.useShopifySalePrice);
     const t = bestOfferThresholds(price, base, rulesFor(listing, settings), settings.bestOfferAutoAcceptPct, settings.bestOfferAutoDecline);
@@ -630,7 +634,7 @@ function groupPayload(listing: Listing, items: Item[]): ebay.ItemGroupPayload {
   const hasVariantImages = new Set(items.map((i) => i.image_url).filter(Boolean)).size > 1;
   return {
     title: listing.title,
-    description: listing.description_html,
+    description: removeOffsiteLinks(listing.description_html),
     imageUrls: json<string[]>(listing.image_urls, []).slice(0, 24),
     aspects: Object.fromEntries(Object.entries(json<Record<string, string[]>>(listing.aspects, {})).filter(([k]) => !varies.includes(k))),
     variantSKUs: items.map((i) => i.sku),

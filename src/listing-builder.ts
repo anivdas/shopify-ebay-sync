@@ -115,6 +115,44 @@ export function sanitizeHtml(html: string): string {
     .trim();
 }
 
+// eBay rejects descriptions that point buyers off eBay (web links, emails), even an artist credit.
+// Domains need a 2+ character name before the TLD so abbreviations like "U.S." or "U.K." are not matched.
+const OFFSITE =
+  /[\w.+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b|(?:https?:\/\/|www\.)(?:(?!&[lg]t;)[^\s<>"'])*(?:(?!&[lg]t;)[^\s<>"'.,;:!?)\]}])|\b[a-z0-9][a-z0-9-]*[a-z0-9](?:\.[a-z0-9-]+)*\.(?:com|net|org|info|biz|io|co|me|art|shop|store|xyz|app|dev|tv|us|uk|ca|au|de|fr|jp|kr|cn|cz|it|es|nl|eu|ly|gg|link|site|online|club|studio|gallery|design)\b(?:\/(?:(?!&[lg]t;)[^\s<>"'])*(?:(?!&[lg]t;)[^\s<>"'.,;:!?)\]}])|\/)?/gi;
+const textParts = (html: string) => html.split(/(<[^>]*>)/);
+
+/** Web addresses and emails a buyer would see in the description (image sources are not counted). */
+export function findOffsiteLinks(html: string): string[] {
+  const found = new Set<string>();
+  for (const m of (html || '').matchAll(/<a\b[^>]*\bhref\s*=\s*["']?(?!#)([^"'\s>]+)/gi)) found.add(m[1]);
+  textParts(html || '').forEach((p, i) => i % 2 || p.match(OFFSITE)?.forEach((u) => found.add(u)));
+  return [...found];
+}
+
+/**
+ * Removes links and contact details eBay treats as off-eBay selling: <a> tags keep their text,
+ * bare URLs/domains/emails are deleted, and brackets or separators they leave empty are tidied up.
+ */
+export function removeOffsiteLinks(html: string): string {
+  const unlinked = (html || '').replace(/<a\b[^>]*>([\s\S]*?)<\/a\s*>/gi, '$1').replace(/<\/?a\b[^>]*>/gi, '');
+  return textParts(unlinked)
+    .map((p, i) => {
+      const cleaned = i % 2 ? p : p.replace(OFFSITE, '');
+      if (cleaned === p) return p;
+      return cleaned
+        .replace(/(\(|\[|\{|&lt;)[\s:,\-–—|/]*(\)|\]|\}|&gt;)/g, '')
+        .replace(/[ \t]*[-–—:|,/]+[ \t]*$/, '')
+        .replace(/^[ \t]*[-–—|,/]+[ \t]*/, '')
+        .replace(/([-–—|,/])(?:[ \t]*\1)+/g, '$1')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/[ \t]+([.,;!?])/g, '$1');
+    })
+    .join('')
+    .replace(/[(\[{]\s*((?:<[^>]+>\s*)*)[)\]}]/g, '$1')
+    .replace(/[ \t]+(<\/(?:p|li|div|td|h[1-6])>|<br\b)/gi, '$1')
+    .replace(/<(p|li|div|span|b|strong|em|i)\b[^>]*>\s*<\/\1>/gi, '');
+}
+
 export const stripHtml = (html: string) =>
   collapse((html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&'));
 
@@ -228,7 +266,7 @@ export function renderDescription(template: string, vars: { title: string; descr
     .replace(ph('full_title'), full)
     .replace(ph('title'), escHtml(vars.title))
     .replace(ph('description'), () => description);
-  return sanitizeHtml(`<div style="${DESCRIPTION_STYLE}">\n${body}\n</div>`);
+  return removeOffsiteLinks(sanitizeHtml(`<div style="${DESCRIPTION_STYLE}">\n${body}\n</div>`));
 }
 
 /** Plain mode: no styles, colors, bold/italics, rules or headings in the template (headings become paragraphs). */

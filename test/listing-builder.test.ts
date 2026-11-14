@@ -162,3 +162,34 @@ test('inferAspects fills only empty aspects using allowed values', () => {
   const out = inferAspects({ title: 'The Substance 4K Blu-ray Steelbook', description: 'Playback: Region Free' }, defs, { 'Case Type': ['Standard'] });
   assert.deepEqual(out, { Format: ['4K UHD Blu-ray'], 'Movie/TV Title': ['The Substance'], 'Region Code': ['Region Free'] });
 });
+
+import { findOffsiteLinks, removeOffsiteLinks } from '../src/listing-builder.ts';
+
+test('removeOffsiteLinks strips URLs, domains and emails, including the brackets around them', () => {
+  const cases: [string, string][] = [
+    ['<p>Art by Jane Doe (https://janedoe.art/work)</p>', '<p>Art by Jane Doe</p>'],
+    ['<p>Art by Jane Doe [www.janedoe.com]</p>', '<p>Art by Jane Doe</p>'],
+    ['<p>Art by Jane Doe {janedoe.com}.</p>', '<p>Art by Jane Doe.</p>'],
+    ['<p>Art by Jane Doe &lt;https://x.com/jane&gt;</p>', '<p>Art by Jane Doe</p>'],
+    ['<p>Artwork: <a href="https://janedoe.com">Jane Doe</a></p>', '<p>Artwork: Jane Doe</p>'],
+    ['<p>Art by Jane Doe (<a href="https://janedoe.com">janedoe.com</a>)</p>', '<p>Art by Jane Doe</p>'],
+    ['<p>Artist website: https://janedoe.com</p>', '<p>Artist website</p>'],
+    ['<p>Artist - instagram.com/janedoe - thanks!</p>', '<p>Artist - thanks!</p>'],
+    ['<p>Questions? mail jane@example.com today</p>', '<p>Questions? mail today</p>'],
+    ['<p>https://janedoe.com</p><p>Region free</p>', '<p>Region free</p>'],
+  ];
+  for (const [input, want] of cases) assert.equal(removeOffsiteLinks(input), want, input);
+});
+
+test('removeOffsiteLinks keeps images, normal text and abbreviations', () => {
+  const keep = '<p><img src="https://cdn.shopify.com/a.jpg"> U.S. and U.K. release, Vol. 2, 4K UHD + Blu-ray (2 discs). Limited to 500!</p>';
+  assert.equal(removeOffsiteLinks(keep), keep);
+  assert.deepEqual(findOffsiteLinks(keep), []);
+  assert.deepEqual(findOffsiteLinks('<p><a href="https://a.com">x</a> see bb.net/page.</p>'), ['https://a.com', 'bb.net/page']);
+});
+
+test('renderDescription removes links from the Shopify description', () => {
+  const out = renderDescription('{{description}}', { title: 'M', description: '<p>Steelbook art by Jane (https://janedoe.art)</p>', showFullTitle: false });
+  assert.doesNotMatch(out, /janedoe|\(\)/);
+  assert.match(out, /Steelbook art by Jane/);
+});
