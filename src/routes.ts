@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { runAutoList } from './autolist.ts';
 import * as catalog from './catalog.ts';
-import { eligibility, listOverrides, setOverride } from './rules.ts';
+import { eligibility, listOverrides, profileFor, profileRules, setOverride } from './rules.ts';
 import { countryValue, inferAspects, renderDescription, smartTitle, stripHtml } from './listing-builder.ts';
 import { config, MARKETPLACES } from './config.ts';
 import { describeCredentials, ebayConf, ebayConfigured, saveCredentials, shopifyConf, shopifyConfigured } from './credentials.ts';
@@ -216,7 +216,8 @@ router.put('/api/ebay/locations/:key', async ({ params, body }) => {
   return { key: params.key };
 });
 router.del('/api/ebay/locations/:key', async ({ params }) => {
-  const used = get<{ n: number }>("SELECT COUNT(*) AS n FROM ebay_listings WHERE merchant_location_key = ? AND status != 'draft'", params.key)?.n ?? 0;
+  const settings = getSettings();
+  const used = all<L.Listing>("SELECT * FROM ebay_listings WHERE status != 'draft'").filter((l) => L.effectivePolicy(l, 'merchant_location_key', settings) === params.key).length;
   if (used) throw new HttpError(409, `${used} published listing(s) use this location. Edit it instead of deleting it.`);
   await ebay.deleteLocation(params.key);
   if (getSettings().merchantLocationKey === params.key) updateSettings({ merchantLocationKey: '' });
@@ -436,7 +437,22 @@ router.post('/api/catalog/undo', async () => {
 
 router.get('/api/profiles', () => ({ profiles: L.listProfiles().map((p) => ({ ...p, default_aspects: json(p.default_aspects, {}) })) }));
 router.post('/api/profiles', ({ body }) => ({ profile: L.saveProfile(body) }));
-router.put('/api/profiles/:id', (ctx) => ({ profile: L.saveProfile(ctx.body, id(ctx)) }));
+router.put('/api/profiles/:id', (ctx) => {
+  const before = L.getProfile(id(ctx));
+  const profile = L.saveProfile(ctx.body, id(ctx));
+  // Listings that follow this profile get its new shipping/payment/return policy, location or box on eBay now
+  const changed = ([...L.POLICY_FIELDS, 'box_id'] as const).filter((f) => before && before[f] !== profile[f]);
+  const affected = changed.length
+    ? all<L.Listing>('SELECT * FROM ebay_listings WHERE profile_id = ?', profile.id).filter((l) => L.isLive(l) && changed.some((f) => !l[f]))
+    : [];
+  if (affected.length) {
+    logActivity('info', 'profile', `Profile "${profile.name}" changed; updating ${affected.length} live listing(s) on eBay`);
+    enqueue('profile-update', async () => {
+      for (const l of affected) await L.publishListing(l.id).catch(() => undefined);
+    }).catch(() => undefined);
+  }
+  return { profile, updating: affected.length };
+});
 router.del('/api/profiles/:id', (ctx) => (L.deleteProfile(id(ctx)), { ok: true }));
 
 // ============ Listings ============
@@ -482,7 +498,7 @@ router.get('/api/listings', ({ query }) => {
   return {
     listings: rows.map((l) => {
       const pkg = L.listingPackage(l);
-      return { ...L.decodeListing(l), stale: staleIds.has(l.id), box: pkg.box, items: L.getItems(l.id).map((i) => ({ ...enrichItem(i, l), ...pkg.item(i) })) };
+      return { ...L.decodeListing(l), ...L.inheritance(l), stale: staleIds.has(l.id), box: pkg.box, items: L.getItems(l.id).map((i) => ({ ...enrichItem(i, l), ...pkg.item(i) })) };
     }),
   };
 });
@@ -491,7 +507,7 @@ router.get('/api/listings/:id', (ctx) => {
   const l = L.getListing(id(ctx));
   if (!l) throw new HttpError(404, 'Listing not found');
   const pkg = L.listingPackage(l);
-  return { listing: { ...L.decodeListing(l), box: pkg.box, items: L.getItems(l.id).map((i) => ({ ...enrichItem(i, l), ...pkg.item(i) })) } };
+  return { listing: { ...L.decodeListing(l), ...L.inheritance(l), box: pkg.box, items: L.getItems(l.id).map((i) => ({ ...enrichItem(i, l), ...pkg.item(i) })) } };
 });
 
 router.post('/api/listings', async ({ body }) => {
@@ -530,13 +546,36 @@ router.post('/api/listings/bulk-action', async ({ body }) => {
   const action = String(body?.action);
   const boxId = body?.boxId ? String(body.boxId) : null;
   if (action === 'set-box' && boxId && !getBoxes(getSettings()).some((b) => b.id === boxId)) throw new HttpError(400, 'Unknown box');
-  const results: { id: number; ok: boolean; error?: string }[] = [];
+  const policyId = body?.policyId ? String(body.policyId) : null;
+  if (action === 'set-shipping' && policyId && !(await ebay.getPolicies()).fulfillment.some((p) => p.id === policyId)) throw new HttpError(400, 'Unknown shipping policy');
+  const profileId = body?.profileId === 'keep' || body?.profileId === undefined ? undefined : body.profileId ? Number(body.profileId) : null;
+  const settings = getSettings();
+  const rules = profileRules(settings);
+  if (action === 'apply-rules' && !rules.length) throw new HttpError(400, 'No profile rules yet. Add them under Settings > Rules first.');
+  const products = new Map<string, Promise<shopify.ShopifyProduct | null>>();
+  const results: { id: number; ok: boolean; error?: string; note?: string }[] = [];
   for (const lid of ids) {
     try {
-      if (action === 'set-box') {
-        // Live listings are re-sent so eBay's calculated shipping uses the new package right away
-        const listing = L.updateListing(lid, { box_id: boxId });
-        if (['published', 'out_of_stock', 'paused', 'error'].includes(listing.status) && listing.ebay_listing_id) await L.publishListing(lid);
+      let note: string | undefined;
+      if (action === 'set-box' || action === 'set-shipping' || action === 'apply-profile' || action === 'apply-rules') {
+        let listing: L.Listing | undefined;
+        if (action === 'set-box') listing = L.updateListing(lid, { box_id: boxId });
+        else if (action === 'set-shipping') listing = L.updateListing(lid, { fulfillment_policy_id: policyId });
+        else if (action === 'apply-profile') listing = L.applyProfile(lid, profileId);
+        else {
+          const current = L.getListing(lid);
+          if (!current) throw new Error('Listing not found');
+          if (!products.has(current.shopify_product_id)) products.set(current.shopify_product_id, shopify.getProduct(current.shopify_product_id));
+          const p = await products.get(current.shopify_product_id)!;
+          if (!p) throw new Error('The Shopify product no longer exists');
+          const match = profileFor({ id: p.id, title: p.title, tags: p.tags, productType: p.productType, vendor: p.vendor, collections: p.collections }, rules);
+          if (match) {
+            listing = L.applyProfile(lid, match);
+            note = L.getProfile(match)?.name;
+          } else note = 'no rule matched';
+        }
+        // Live listings are re-sent so eBay's shipping options/cost change right away
+        if (listing && L.isLive(listing)) await L.publishListing(lid);
       } else if (action === 'publish') await L.publishListing(lid);
       else if (action === 'end') await L.endListing(lid);
       else if (action === 'refresh') await L.refreshFromShopify(lid);
@@ -544,7 +583,7 @@ router.post('/api/listings/bulk-action', async ({ body }) => {
       else if (action === 'apply-suggestions') for (const item of L.getItems(lid)) applySuggestion(item.id);
       else if (action === 'delete') await L.deleteListing(lid);
       else throw new Error(`Unknown action ${action}`);
-      results.push({ id: lid, ok: true });
+      results.push({ id: lid, ok: true, note });
     } catch (e) {
       results.push({ id: lid, ok: false, error: (e as Error).message });
     }

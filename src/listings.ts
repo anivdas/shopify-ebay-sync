@@ -142,6 +142,43 @@ export function rulesFor(listing: Pick<Listing, 'profile_id'>, settings: Setting
   };
 }
 
+const POLICY_DEFAULTS = { fulfillment_policy_id: 'fulfillmentPolicyId', payment_policy_id: 'paymentPolicyId', return_policy_id: 'returnPolicyId', merchant_location_key: 'merchantLocationKey' } as const;
+export type PolicyField = keyof typeof POLICY_DEFAULTS;
+export const POLICY_FIELDS = Object.keys(POLICY_DEFAULTS) as PolicyField[];
+
+/** What a listing uses when it has no setting of its own: its profile's, else the app default. */
+export function inheritedPolicy(listing: Pick<Listing, 'profile_id'>, field: PolicyField, settings: Settings = getSettings()) {
+  const fromProfile = getProfile(listing.profile_id)?.[field];
+  return fromProfile ? { value: fromProfile, from: 'profile' as const } : { value: settings[POLICY_DEFAULTS[field]] || null, from: 'default' as const };
+}
+
+/** Listing's own setting wins, then its profile's, then the app default. */
+export const effectivePolicy = (listing: Pick<Listing, 'profile_id' | PolicyField>, field: PolicyField, settings: Settings = getSettings()) =>
+  listing[field] || inheritedPolicy(listing, field, settings).value;
+
+/** Puts a listing on a profile (or none; undefined keeps it) and drops its own policy/location/box so it follows the profile. */
+export function applyProfile(id: number, profileId?: number | null) {
+  if (profileId && !getProfile(profileId)) throw new HttpError(400, 'Unknown profile');
+  const keep = profileId === undefined;
+  run(
+    `UPDATE ebay_listings SET ${keep ? '' : 'profile_id = ?, '}fulfillment_policy_id = NULL, payment_policy_id = NULL, return_policy_id = NULL, merchant_location_key = NULL, box_id = NULL, updated_at = ? WHERE id = ?`,
+    ...(keep ? [] : [profileId]),
+    nowIso(),
+    id,
+  );
+  return getListing(id)!;
+}
+
+/** For the UI: what each policy field falls back to, and the profile's name. */
+export function inheritance(listing: Pick<Listing, 'profile_id'>, settings: Settings = getSettings()) {
+  return {
+    profile_name: getProfile(listing.profile_id)?.name ?? null,
+    inherited: Object.fromEntries(POLICY_FIELDS.map((f) => [f, inheritedPolicy(listing, f, settings)])) as Record<PolicyField, ReturnType<typeof inheritedPolicy>>,
+  };
+}
+
+export const isLive = (l: Pick<Listing, 'status' | 'ebay_listing_id'>) => !!l.ebay_listing_id && ['published', 'out_of_stock', 'paused', 'error'].includes(l.status);
+
 /** The price this item should have on eBay right now (before safety guards). */
 export function targetPrice(item: Item, rules: PricingRules, settings: Settings): number | null {
   if (item.shopify_price === null) return null;
@@ -195,7 +232,19 @@ export function saveProfile(input: Partial<Profile> & { name: string }, id?: num
   return getProfile(Number(res.lastInsertRowid))!;
 }
 
-export const deleteProfile = (id: number) => run('DELETE FROM profiles WHERE id = ?', id);
+/** Listings on a deleted profile keep what it gave them (so nothing changes on eBay) and then have no profile. */
+export function deleteProfile(id: number) {
+  const p = getProfile(id);
+  tx(() => {
+    if (p)
+      run(
+        `UPDATE ebay_listings SET fulfillment_policy_id = COALESCE(fulfillment_policy_id, ?), payment_policy_id = COALESCE(payment_policy_id, ?), return_policy_id = COALESCE(return_policy_id, ?),
+           merchant_location_key = COALESCE(merchant_location_key, ?), box_id = COALESCE(box_id, ?), profile_id = NULL WHERE profile_id = ?`,
+        p.fulfillment_policy_id, p.payment_policy_id, p.return_policy_id, p.merchant_location_key, p.box_id, id,
+      );
+    run('DELETE FROM profiles WHERE id = ?', id);
+  });
+}
 
 // ---------------- Drafts ----------------
 
@@ -316,12 +365,12 @@ export async function createDrafts(opts: { productId: string; variantIds?: strin
         description,
         JSON.stringify(listingImages),
         JSON.stringify(varyingOptions),
-        profile?.fulfillment_policy_id || settings.fulfillmentPolicyId || null,
-        profile?.payment_policy_id || settings.paymentPolicyId || null,
-        profile?.return_policy_id || settings.returnPolicyId || null,
-        profile?.merchant_location_key || settings.merchantLocationKey || null,
+        null,
+        null,
+        null,
+        null,
         !asGroup && (profile?.best_offer_enabled ?? (settings.bestOfferDefault ? 1 : 0)) ? 1 : 0,
-        profile?.box_id || null,
+        null,
         fullTitle,
         excluded,
         excluded ? 1 : 0,
@@ -498,10 +547,10 @@ export async function validateListing(id: number): Promise<Issue[]> {
   if (!listing.title.trim()) err('title', 'Title is required');
   if (listing.title.length > 80) err('title', 'Title must be 80 characters or fewer');
   if (!listing.category_id) err('category_id', 'Choose an eBay category');
-  if (!listing.fulfillment_policy_id && !settings.fulfillmentPolicyId) err('fulfillment_policy_id', 'Choose a shipping (fulfillment) policy');
-  if (!listing.payment_policy_id && !settings.paymentPolicyId) err('payment_policy_id', 'Choose a payment policy');
-  if (!listing.return_policy_id && !settings.returnPolicyId) err('return_policy_id', 'Choose a return policy');
-  if (!listing.merchant_location_key && !settings.merchantLocationKey) err('merchant_location_key', 'Choose an inventory location (Settings > eBay defaults)');
+  if (!effectivePolicy(listing, 'fulfillment_policy_id', settings)) err('fulfillment_policy_id', 'Choose a shipping (fulfillment) policy');
+  if (!effectivePolicy(listing, 'payment_policy_id', settings)) err('payment_policy_id', 'Choose a payment policy');
+  if (!effectivePolicy(listing, 'return_policy_id', settings)) err('return_policy_id', 'Choose a return policy');
+  if (!effectivePolicy(listing, 'merchant_location_key', settings)) err('merchant_location_key', 'Choose an inventory location (Settings > eBay defaults)');
   const images = json<string[]>(listing.image_urls, []);
   if (!images.length) err('image_urls', 'At least one image is required');
   if (images.some((u) => !u.startsWith('https://'))) err('image_urls', 'All image URLs must use https');
@@ -603,12 +652,12 @@ export function offerPayload(listing: Listing, item: Item, price: number, qty: n
     format: 'FIXED_PRICE',
     availableQuantity: qty,
     categoryId: listing.category_id!,
-    merchantLocationKey: (listing.merchant_location_key || settings.merchantLocationKey)!,
+    merchantLocationKey: effectivePolicy(listing, 'merchant_location_key', settings)!,
     pricingSummary: { price: money(price) },
     listingPolicies: {
-      fulfillmentPolicyId: (listing.fulfillment_policy_id || settings.fulfillmentPolicyId)!,
-      paymentPolicyId: (listing.payment_policy_id || settings.paymentPolicyId)!,
-      returnPolicyId: (listing.return_policy_id || settings.returnPolicyId)!,
+      fulfillmentPolicyId: effectivePolicy(listing, 'fulfillment_policy_id', settings)!,
+      paymentPolicyId: effectivePolicy(listing, 'payment_policy_id', settings)!,
+      returnPolicyId: effectivePolicy(listing, 'return_policy_id', settings)!,
     },
   };
   if (listing.kind === 'single') offer.listingDescription = removeOffsiteLinks(listing.description_html);
@@ -697,8 +746,8 @@ export async function publishListing(id: number, opts: { skipValidation?: boolea
       ebayErrors: e instanceof ebay.EbayError ? e.errors.map(({ errorId, message: m, parameters }) => ({ errorId, message: m, parameters })) : undefined,
       sent: getItems(id).map((i) => ({ sku: i.sku, package: pkg.item(i).package, mpn: i.mpn || undefined })),
       policies: {
-        fulfillment: listing.fulfillment_policy_id || getSettings().fulfillmentPolicyId,
-        location: listing.merchant_location_key || getSettings().merchantLocationKey,
+        fulfillment: effectivePolicy(listing, 'fulfillment_policy_id'),
+        location: effectivePolicy(listing, 'merchant_location_key'),
       },
     });
     throw e;

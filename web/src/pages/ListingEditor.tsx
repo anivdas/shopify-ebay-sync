@@ -15,7 +15,7 @@ export function ListingEditor({ id }: { id: number }) {
   const locations = useApi(status.data?.ebay?.connected ? '/api/ebay/locations' : null);
   const settingsQ = useApi('/api/settings');
   const defaults = settingsQ.data?.settings ?? {};
-  const defaultLabel = (key: string | undefined, name: string | undefined) => (key ? `Use default (${name ?? key})` : 'Select... (no default set)');
+  const defaultLabel = (key: string | undefined, name: string | undefined, from = 'default') => (key ? `Use ${from} (${name ?? key})` : 'Select... (no default set)');
   const boxes = JSON.parse(settingsQ.data?.settings?.shippingBoxes || '[]') as { id: string; name: string; length: number; width: number; height: number; unit: string }[];
   const [draft, setDraft] = useState<any>(null);
   const [items, setItems] = useState<Record<number, any>>({});
@@ -326,13 +326,13 @@ export function ListingEditor({ id }: { id: number }) {
                 </select>
               </Field>
               {[
-                ['fulfillment_policy_id', 'Shipping policy', policies.data?.fulfillment, defaults.fulfillmentPolicyId],
-                ['payment_policy_id', 'Payment policy', policies.data?.payment, defaults.paymentPolicyId],
-                ['return_policy_id', 'Return policy', policies.data?.returns, defaults.returnPolicyId],
-              ].map(([k, label, list, def]: any) => (
+                ['fulfillment_policy_id', 'Shipping policy', policies.data?.fulfillment],
+                ['payment_policy_id', 'Payment policy', policies.data?.payment],
+                ['return_policy_id', 'Return policy', policies.data?.returns],
+              ].map(([k, label, list]: any) => (
                 <Field key={k} label={label}>
                   <select className="input" value={draft[k] ?? ''} onChange={(e) => set(k, e.target.value)}>
-                    <option value="">{defaultLabel(def, (list ?? []).find((p: any) => p.id === def)?.name)}</option>
+                    <option value="">{defaultLabel(l.inherited?.[k]?.value, (list ?? []).find((p: any) => p.id === l.inherited?.[k]?.value)?.name, l.inherited?.[k]?.from)}</option>
                     {(list ?? []).map((p: any) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -343,7 +343,7 @@ export function ListingEditor({ id }: { id: number }) {
               ))}
               <Field label="Ships from">
                 <select className="input" value={draft.merchant_location_key ?? ''} onChange={(e) => set('merchant_location_key', e.target.value)}>
-                  <option value="">{defaultLabel(defaults.merchantLocationKey, (locations.data?.locations ?? []).find((x: any) => x.merchantLocationKey === defaults.merchantLocationKey)?.name)}</option>
+                  <option value="">{defaultLabel(l.inherited?.merchant_location_key?.value, (locations.data?.locations ?? []).find((x: any) => x.merchantLocationKey === l.inherited?.merchant_location_key?.value)?.name, l.inherited?.merchant_location_key?.from)}</option>
                   {(locations.data?.locations ?? []).map((x: any) => (
                     <option key={x.merchantLocationKey} value={x.merchantLocationKey}>
                       {x.name ?? x.merchantLocationKey}

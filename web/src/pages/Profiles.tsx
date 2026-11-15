@@ -52,12 +52,12 @@ export function Profiles() {
             .map(([k, ...rest]) => [k.trim(), rest.join(':').split(',').map((s) => s.trim()).filter(Boolean)]),
         );
         const body = { ...edit, default_aspects };
-        if (edit?.id) await put(`/api/profiles/${edit.id}`, body);
-        else await post('/api/profiles', body);
+        const r: any = edit?.id ? await put(`/api/profiles/${edit.id}`, body) : await post('/api/profiles', body);
         setEdit(null);
         list.reload();
+        return r;
       },
-      'Profile saved',
+      (r: any) => (r?.updating ? `Profile saved. Updating ${r.updating} live listing(s) on eBay (see Activity)` : 'Profile saved'),
     );
   const policySelect = (k: string, label: string, opts: any[] = []) => (
     <Field label={label}>
@@ -100,7 +100,7 @@ export function Profiles() {
                   <button
                     className="btn-ghost p-1.5 text-rose-500"
                     onClick={async () => {
-                      if (await confirm({ title: `Delete "${p.name}"?`, body: 'Listings using it keep their current settings.', confirm: 'Delete', danger: true })) run('del', () => del(`/api/profiles/${p.id}`).then(list.reload));
+                      if (await confirm({ title: `Delete "${p.name}"?`, body: 'Listings using it keep the settings it gave them, so nothing changes on eBay.', confirm: 'Delete', danger: true })) run('del', () => del(`/api/profiles/${p.id}`).then(list.reload));
                     }}
                   >
                     <Trash2 className="size-3.5" />
