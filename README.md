@@ -72,6 +72,7 @@ It runs on a NAS (Synology, Unraid, QNAP), a Raspberry Pi, a home server or any 
 
 - A **Shopify** store. Any plan works.
 - An **eBay seller account**. A store subscription is recommended but not required. You also need **business policies** for shipping, payment and returns; the wizard helps you turn them on.
+- eBay's **out-of-stock option** turned on: in Seller Hub, go to **Account → Selling preferences → Multi-quantity listings** and switch on **"Listings stay active when you're out of stock"**. Without it, eBay refuses to set a listing to 0, so an item that sells out in Shopify could stay buyable on eBay. See [Troubleshooting](#troubleshooting).
 - A computer that's always on and can run **Docker**: Synology/QNAP/Unraid NAS, Raspberry Pi 4/5, mini PC, etc. The app uses about 100–200 MB of RAM.
 - About **20 minutes** for setup.
 
@@ -132,6 +133,7 @@ When you first open the app you create a dashboard password. The wizard then wal
 4. **Shipping and policies.** Choose default shipping, payment and return policies, and where you ship from.
    - **Calculated shipping:** enter your box sizes once (Shopify doesn't let apps read saved package sizes). The app sends each listing's box dimensions plus the product weight from Shopify plus the empty box weight to eBay.
    - Also set the **typical shipping buyers pay you**, so price comparisons use your price + shipping against competitors' price + shipping.
+   - In eBay Seller Hub, turn on **Account → Selling preferences → Multi-quantity listings → "Listings stay active when you're out of stock"**. Sold-out items then drop to 0 and come back under the same item number when restocked.
 5. **Pricing rules.** Set the markup range, automatic repricing, Best Offer and fees.
 6. **Extras (optional):**
    - phone alerts;
@@ -236,6 +238,7 @@ To move or restore the app, copy the whole `data` folder. It contains the databa
 | eBay: business policies error | Enable business policies in the wizard (or in Seller Hub), then create a shipping, a payment and a return policy. |
 | A listing fails to publish | Open the listing. The **Ready to publish?** panel lists what eBay needs, usually a required item specific. |
 | Sold prices say "not available" | Your keyset hasn't been approved for the Marketplace Insights API yet (see above). |
+| Sold out in Shopify but still buyable on eBay, or eBay error **25004** ("The quantity must be a valid number greater than 0") | Turn on eBay's out-of-stock option: Seller Hub → **Account → Selling preferences → Multi-quantity listings** → **"Listings stay active when you're out of stock"**, then run **Shopify -> eBay price & stock** (▶ on the Dashboard). Until it's on, the app ends sold-out listings and relists them, under a new item number, once Shopify has stock again. |
 | An eBay sale didn't reduce Shopify | Check **eBay sales**. "No match" means the SKU wasn't found. Listings created by this app always match. |
 
 **Don't edit listings created by this app in eBay Seller Hub.** eBay manages listings created through its Inventory API differently, and manual edits can be overwritten or cause errors. Make changes in this app instead. Quantity and price corrections made in Seller Hub are detected and fixed automatically.
