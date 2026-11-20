@@ -115,10 +115,13 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
       if (u.quantity !== undefined) sets.push('ebay_qty = ?'), vals.push(u.quantity);
       if (u.price !== undefined) sets.push('ebay_price = ?'), vals.push(u.price);
       run(`UPDATE listing_items SET ${sets.join(', ')} WHERE sku = ?`, ...vals, u.sku);
+    } else if (u.quantity === 0 && OUT_OF_STOCK_REFUSED.test(r?.error ?? '') && (await endSoldOut(u))) {
+      ok++;
     } else {
       failed++;
-      run('UPDATE listing_items SET last_error = ? WHERE sku = ?', r?.error ?? 'Unknown eBay error', u.sku);
-      logActivity('error', 'sync.push', `eBay update failed for ${u.sku}: ${r?.error ?? 'unknown error'}`, { sent: u, ebayResponse: r?.raw });
+      const error = `${r?.error ?? 'Unknown eBay error'}${OUT_OF_STOCK_REFUSED.test(r?.error ?? '') ? OUT_OF_STOCK_HINT : ''}`;
+      run('UPDATE listing_items SET last_error = ? WHERE sku = ?', error, u.sku);
+      logActivity('error', 'sync.push', `eBay update failed for ${u.sku}: ${error}`, { sent: u, ebayResponse: r?.raw });
     }
   }
   for (const f of fullOfferUpdates) {
@@ -135,6 +138,34 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
   for (const listingId of touched) await reconcileListingStatus(listingId);
   if (ok) logActivity('info', 'sync.push', `Updated ${ok} eBay offer(s) from Shopify`);
   return `${ok} updated, ${failed} failed, ${items.length} checked`;
+}
+
+// eBay refuses quantity 0 on a live listing unless the seller turned on its out-of-stock option (error 25004)
+const OUT_OF_STOCK_REFUSED = /eBay error 25004\b|must be a valid number greater than 0/i;
+const OUT_OF_STOCK_HINT =
+  ` To let listings drop to 0 instead, turn on eBay's out-of-stock option: Seller Hub > Account > Selling preferences > "Listings stay active when you're out of stock".`;
+
+/**
+ * Sold out but eBay won't take 0: end the listing so it can't be oversold. It is relisted automatically
+ * once Shopify has stock again (see reconcileListingStatus). Multi-variation listings are only ended when every variant is at 0.
+ */
+async function endSoldOut(u: ebay.PriceQtyUpdate): Promise<boolean> {
+  const item = get<Item>('SELECT * FROM listing_items WHERE sku = ? AND offer_id = ?', u.sku, u.offerId);
+  const listing = item && getListing(item.listing_id);
+  if (!item || !listing) return false;
+  const items = getItems(listing.id);
+  try {
+    if (listing.kind === 'group') {
+      if (!listing.group_key || items.some((i) => i.id !== item.id && (i.ebay_qty ?? 0) > 0)) return false;
+      await ebay.withdrawGroup(listing.group_key);
+    } else await ebay.withdrawOffer(u.offerId);
+  } catch (e) {
+    logActivity('error', 'sync.push', `${u.sku} is sold out but eBay refused quantity 0, and ending it failed: ${(e as Error).message}`);
+    return false;
+  }
+  run('UPDATE listing_items SET ebay_qty = 0, last_synced_at = ?, last_error = NULL WHERE listing_id = ?', nowIso(), listing.id);
+  logActivity('warn', 'alert.soldout', `Sold out: ended "${listing.title}" on eBay because eBay won't accept quantity 0. It is relisted automatically when Shopify has stock again.${OUT_OF_STOCK_HINT}`, { listingId: listing.id, sku: u.sku });
+  return true;
 }
 
 /** Marks listings out-of-stock at 0 and republishes them automatically if eBay ended them. */

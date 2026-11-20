@@ -23,6 +23,8 @@ let variantPrice = '100.00';
 let productTitle = 'Test item';
 let orders: any[] = [];
 let bulkRejects = false;
+let zeroRefused = false;
+let offerStatus = 'PUBLISHED';
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -56,8 +58,12 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
       },
       400,
     );
+  if (url.includes('/bulk_update_price_quantity') && zeroRefused && body.requests[0].shipToLocationAvailability?.quantity === 0)
+    return json({ responses: [{ sku: body.requests[0].sku, offerId: 'O1', statusCode: 400, errors: [{ errorId: 25004, message: 'The eBay listing associated with the inventory item, or the unpublished offer has an invalid quantity. The quantity must be a valid number greater than 0.' }] }] }, 400);
+  if (url.endsWith('/offer/O1/withdraw')) return (offerStatus = 'UNPUBLISHED'), json({ listingId: 'L1' });
+  if (url.endsWith('/offer/O1/publish')) return (offerStatus = 'PUBLISHED'), json({ listingId: 'L2' });
   if (url.includes('/bulk_update_price_quantity')) return json({ responses: body.requests.map((r: any) => ({ sku: r.sku, statusCode: 200 })) });
-  if (url.includes('/sell/inventory/v1/offer/')) return json({ offerId: 'O1', sku: 'SKU1', status: 'PUBLISHED', listing: { listingId: 'L1', listingStatus: 'ACTIVE' } });
+  if (url.includes('/sell/inventory/v1/offer/')) return json({ offerId: 'O1', sku: 'SKU1', status: offerStatus, listing: { listingId: 'L1', listingStatus: 'ACTIVE' } });
   throw new Error(`Unmocked fetch: ${url}`);
 }) as typeof fetch;
 
@@ -77,6 +83,8 @@ const order = (cancelled = false) => ({
 beforeEach(() => {
   calls = [];
   bulkRejects = false;
+  zeroRefused = false;
+  offerStatus = 'PUBLISHED';
   run('DELETE FROM ebay_listings');
   run('DELETE FROM processed_orders');
   updateSettings({ dryRun: false, quantityBuffer: 0, priceGuardPct: 30, restockOnCancel: true });
@@ -186,4 +194,24 @@ test("eBay's per-SKU reasons are kept when it rejects the whole batch with a 400
   const log = get<{ message: string; data: string }>(`SELECT message, data FROM activity WHERE type = 'sync.push' ORDER BY id DESC LIMIT 1`)!;
   assert.match(log.message, /SKU1: The offer is no longer published/);
   assert.equal(JSON.parse(log.data).ebayResponse.length, 2, "eBay's raw answer is kept in the details");
+});
+
+test("when eBay refuses quantity 0 (out-of-stock option off), the sold-out listing is ended and relisted on restock", async () => {
+  zeroRefused = true;
+  shopifyAvailable = 0;
+  const summary = await syncShopifyToEbay();
+  assert.match(summary, /1 updated, 0 failed/);
+  assert.ok(calls.some((c) => c.url.endsWith('/offer/O1/withdraw')), 'listing ended so it cannot be oversold');
+  assert.equal(get<{ status: string }>('SELECT status FROM ebay_listings')!.status, 'out_of_stock');
+  assert.equal(get<{ ebay_qty: number; last_error: string | null }>(`SELECT ebay_qty, last_error FROM listing_items WHERE sku = 'SKU1'`)!.ebay_qty, 0);
+
+  calls = [];
+  await syncShopifyToEbay();
+  assert.ok(!calls.some((c) => c.url.includes('bulk_update_price_quantity')), 'nothing is re-sent while still sold out');
+
+  shopifyAvailable = 3;
+  await syncShopifyToEbay();
+  assert.ok(calls.some((c) => c.url.endsWith('/offer/O1/publish')), 'relisted once Shopify has stock');
+  const l = get<{ status: string; ebay_listing_id: string }>('SELECT status, ebay_listing_id FROM ebay_listings')!;
+  assert.deepEqual([l.status, l.ebay_listing_id], ['published', 'L2']);
 });
