@@ -47,7 +47,15 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
   }
   if (url.includes('/sell/fulfillment/v1/order')) return json({ orders, total: orders.length });
   if (url.includes('/bulk_update_price_quantity') && bulkRejects)
-    return json({ responses: body.requests.map((r: any) => ({ sku: r.sku, statusCode: 400, errors: [{ errorId: 25001, message: 'Offer is not available', longMessage: 'The offer is no longer published' }] })) }, 400);
+    return json(
+      {
+        responses: body.requests.flatMap((r: any) => [
+          { sku: r.sku, statusCode: 200 },
+          { offerId: r.offers[0].offerId, statusCode: 400, errors: [{ errorId: 25001, message: 'Offer is not available', longMessage: 'The offer is no longer published' }] },
+        ]),
+      },
+      400,
+    );
   if (url.includes('/bulk_update_price_quantity')) return json({ responses: body.requests.map((r: any) => ({ sku: r.sku, statusCode: 200 })) });
   if (url.includes('/sell/inventory/v1/offer/')) return json({ offerId: 'O1', sku: 'SKU1', status: 'PUBLISHED', listing: { listingId: 'L1', listingStatus: 'ACTIVE' } });
   throw new Error(`Unmocked fetch: ${url}`);
@@ -174,7 +182,8 @@ test("eBay's per-SKU reasons are kept when it rejects the whole batch with a 400
   shopifyAvailable = 4;
   const summary = await syncShopifyToEbay();
   assert.match(summary, /1 failed/);
-  assert.equal(get<{ last_error: string }>(`SELECT last_error FROM listing_items WHERE sku = 'SKU1'`)!.last_error, 'The offer is no longer published');
-  const log = get<{ message: string }>(`SELECT message FROM activity WHERE type = 'sync.push' ORDER BY id DESC LIMIT 1`)!;
+  assert.equal(get<{ last_error: string }>(`SELECT last_error FROM listing_items WHERE sku = 'SKU1'`)!.last_error, 'The offer is no longer published (eBay error 25001)');
+  const log = get<{ message: string; data: string }>(`SELECT message, data FROM activity WHERE type = 'sync.push' ORDER BY id DESC LIMIT 1`)!;
   assert.match(log.message, /SKU1: The offer is no longer published/);
+  assert.equal(JSON.parse(log.data).ebayResponse.length, 2, "eBay's raw answer is kept in the details");
 });

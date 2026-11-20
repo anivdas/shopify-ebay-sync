@@ -373,10 +373,12 @@ export const getListingFees = (offerIds: string[]) =>
 export type PriceQtyUpdate = { sku: string; offerId: string; quantity?: number; price?: number };
 
 export async function bulkUpdatePriceQuantity(updates: PriceQtyUpdate[]) {
-  const results: { sku: string; ok: boolean; error?: string }[] = [];
+  const results: { sku: string; ok: boolean; error?: string; raw?: unknown }[] = [];
   for (let i = 0; i < updates.length; i += 25) {
     const chunk = updates.slice(i, i + 25);
-    type BulkResponse = { responses?: { sku: string; statusCode: number; errors?: EbayErrorItem[] }[] };
+    type BulkEntry = { sku?: string; offerId?: string; statusCode: number; errors?: EbayErrorItem[]; warnings?: EbayErrorItem[] };
+    type BulkResponse = { responses?: BulkEntry[] };
+    let httpStatus = 200;
     // eBay answers 400 when every SKU in the batch failed; the reasons are still listed per SKU in `responses`
     const res = await ebay<BulkResponse>(
       'POST',
@@ -397,15 +399,18 @@ export async function bulkUpdatePriceQuantity(updates: PriceQtyUpdate[]) {
         },
       },
     ).catch((e) => {
-      if (e instanceof EbayError && Array.isArray(e.body?.responses)) return e.body as BulkResponse;
+      if (e instanceof EbayError && Array.isArray(e.body?.responses)) return (httpStatus = e.status), e.body as BulkResponse;
       throw e;
     });
-    for (const r of res.responses ?? []) {
-      results.push({
-        sku: r.sku,
-        ok: r.statusCode >= 200 && r.statusCode < 300,
-        error: r.errors?.map((e) => e.longMessage || e.message).join(' | '),
-      });
+    // eBay can answer with several entries per SKU (the inventory item and each offer); all must succeed
+    for (const u of chunk) {
+      const entries = (res.responses ?? []).filter((r) => (r.sku ?? '').toUpperCase() === u.sku.toUpperCase() || (r.offerId && r.offerId === u.offerId));
+      const ok = entries.length > 0 && entries.every((r) => r.statusCode >= 200 && r.statusCode < 300);
+      const messages = entries.flatMap((r) => r.errors ?? []).map((e) => `${e.longMessage || e.message || 'error'}${e.errorId ? ` (eBay error ${e.errorId})` : ''}`);
+      const fallback = entries.length
+        ? `eBay rejected it without a reason (status ${entries.map((r) => r.statusCode).join(', ')})`
+        : `eBay sent no result for this SKU (HTTP ${httpStatus})`;
+      results.push({ sku: u.sku, ok, error: ok ? undefined : [...new Set(messages)].join(' | ') || fallback, raw: entries });
     }
   }
   return results;

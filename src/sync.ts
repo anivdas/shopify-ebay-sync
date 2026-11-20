@@ -118,7 +118,7 @@ export async function syncShopifyToEbay(opts: { inventoryItemIds?: string[]; pro
     } else {
       failed++;
       run('UPDATE listing_items SET last_error = ? WHERE sku = ?', r?.error ?? 'Unknown eBay error', u.sku);
-      logActivity('error', 'sync.push', `eBay update failed for ${u.sku}: ${r?.error ?? 'unknown error'}`);
+      logActivity('error', 'sync.push', `eBay update failed for ${u.sku}: ${r?.error ?? 'unknown error'}`, { sent: u, ebayResponse: r?.raw });
     }
   }
   for (const f of fullOfferUpdates) {
