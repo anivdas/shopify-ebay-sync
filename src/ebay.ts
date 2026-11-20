@@ -20,10 +20,13 @@ export type EbayErrorItem = { errorId?: number; message?: string; longMessage?: 
 export class EbayError extends Error {
   status: number;
   errors: EbayErrorItem[];
-  constructor(status: number, errors: EbayErrorItem[], fallback: string) {
+  /** The parsed response body (bulk calls put per-item errors here instead of in `errors`). */
+  body: any;
+  constructor(status: number, errors: EbayErrorItem[], fallback: string, body: any = {}) {
     super(errors.map((e) => e.longMessage || e.message).filter(Boolean).join(' | ') || fallback);
     this.status = status;
     this.errors = errors;
+    this.body = body;
   }
 }
 
@@ -130,7 +133,7 @@ export async function ebay<T = any>(method: string, path: string, opts: RequestO
     } catch {
       body = { errors: [{ message: text.slice(0, 300) }] };
     }
-    if (!res.ok) throw new EbayError(res.status, body.errors ?? [], `eBay ${method} ${path} failed (${res.status})`);
+    if (!res.ok) throw new EbayError(res.status, body.errors ?? [], `eBay ${method} ${path} failed (${res.status})`, body);
     if (body.warnings?.length) console.warn(`eBay warnings for ${method} ${path}:`, JSON.stringify(body.warnings));
     return body as T;
   }
@@ -373,7 +376,9 @@ export async function bulkUpdatePriceQuantity(updates: PriceQtyUpdate[]) {
   const results: { sku: string; ok: boolean; error?: string }[] = [];
   for (let i = 0; i < updates.length; i += 25) {
     const chunk = updates.slice(i, i + 25);
-    const res = await ebay<{ responses?: { sku: string; statusCode: number; errors?: EbayErrorItem[] }[] }>(
+    type BulkResponse = { responses?: { sku: string; statusCode: number; errors?: EbayErrorItem[] }[] };
+    // eBay answers 400 when every SKU in the batch failed; the reasons are still listed per SKU in `responses`
+    const res = await ebay<BulkResponse>(
       'POST',
       '/sell/inventory/v1/bulk_update_price_quantity',
       {
@@ -391,7 +396,10 @@ export async function bulkUpdatePriceQuantity(updates: PriceQtyUpdate[]) {
           })),
         },
       },
-    );
+    ).catch((e) => {
+      if (e instanceof EbayError && Array.isArray(e.body?.responses)) return e.body as BulkResponse;
+      throw e;
+    });
     for (const r of res.responses ?? []) {
       results.push({
         sku: r.sku,
