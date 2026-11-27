@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { fetchRetry } from './http.ts';
 import { shopifyConf, shopifyConfigured } from './credentials.ts';
 import { uuidFrom } from './crypto.ts';
 import { getToken, setToken } from './db.ts';
@@ -17,7 +18,7 @@ async function accessToken(): Promise<string> {
   if (shopifyConf().accessToken) return shopifyConf().accessToken;
   const cached = getToken('shopify_access');
   if (cached && cached.expiresAt && cached.expiresAt - 5 * 60_000 > Date.now()) return cached.value;
-  const res = await fetch(`https://${shopifyConf().shop}.myshopify.com/admin/oauth/access_token`, {
+  const res = await fetchRetry(`https://${shopifyConf().shop}.myshopify.com/admin/oauth/access_token`, () => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -26,7 +27,7 @@ async function accessToken(): Promise<string> {
       client_secret: shopifyConf().clientSecret,
     }),
     signal: AbortSignal.timeout(20_000),
-  });
+  }), { idempotent: true });
   const body = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error?: string; error_description?: string };
   if (!res.ok || !body.access_token) throw new ShopifyError(`Shopify token request failed: ${body.error_description || body.error || res.status}`);
   setToken('shopify_access', body.access_token, Date.now() + (body.expires_in ?? 86399) * 1000);
@@ -36,12 +37,14 @@ async function accessToken(): Promise<string> {
 export async function gql<T = any>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
   if (!shopifyConfigured()) throw new ShopifyError('Shopify is not configured (check SHOPIFY_* env vars)');
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`https://${shopifyConf().shop}.myshopify.com/admin/api/${shopifyConf().apiVersion}/graphql.json`, {
+    const token = await accessToken();
+    // Queries are reads, stock adjustments carry an idempotency key, and other mutations set absolute values
+    const res = await fetchRetry(`https://${shopifyConf().shop}.myshopify.com/admin/api/${shopifyConf().apiVersion}/graphql.json`, () => ({
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await accessToken() },
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(30_000),
-    });
+    }), { idempotent: true });
     if ((res.status === 429 || res.status >= 500) && attempt < 5) {
       await sleep(1000 * 2 ** attempt);
       continue;

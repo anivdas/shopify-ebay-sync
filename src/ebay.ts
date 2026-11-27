@@ -1,4 +1,5 @@
 import { ebayConf, ebayConfigured } from './credentials.ts';
+import { fetchRetry } from './http.ts';
 import { deleteToken, getToken, setToken } from './db.ts';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -34,12 +35,12 @@ const basicAuth = () => `Basic ${Buffer.from(`${ebayConf().clientId}:${ebayConf(
 const apizBase = () => ebayConf().apizBase;
 
 async function tokenRequest(params: Record<string, string>) {
-  const res = await fetch(`${ebayConf().apiBase}/identity/v1/oauth2/token`, {
+  const res = await fetchRetry(`${ebayConf().apiBase}/identity/v1/oauth2/token`, () => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: basicAuth() },
     body: new URLSearchParams(params),
     signal: AbortSignal.timeout(20_000),
-  });
+  }), { idempotent: true });
   const body = (await res.json().catch(() => ({}))) as Record<string, any>;
   if (!res.ok) throw new EbayError(res.status, [{ message: body.error_description || body.error }], `eBay token error ${res.status}`);
   return body as { access_token: string; expires_in: number; refresh_token?: string; refresh_token_expires_in?: number };
@@ -104,7 +105,9 @@ export async function ebay<T = any>(method: string, path: string, opts: RequestO
   for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
   for (let attempt = 0; ; attempt++) {
     const token = opts.auth === 'app' ? await appToken() : opts.auth === 'insights' ? await appToken(INSIGHTS_SCOPE) : await userToken();
-    const res = await fetch(url, {
+    const res = await fetchRetry(
+      url,
+      () => ({
       method,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -117,7 +120,10 @@ export async function ebay<T = any>(method: string, path: string, opts: RequestO
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: AbortSignal.timeout(45_000),
-    });
+      }),
+      // Reads, absolute updates (PUT/DELETE, bulk price/stock) are safe to repeat; other POSTs are not
+      { idempotent: method !== 'POST' || path.endsWith('/bulk_update_price_quantity') },
+    );
     if ((res.status === 429 || res.status >= 500) && attempt < 4) {
       await sleep(1500 * 2 ** attempt);
       continue;

@@ -92,3 +92,32 @@ export function sendJson(res: ServerResponse, status: number, data: unknown) {
 }
 
 export const num = (v: string | null, fallback: number) => (v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : fallback);
+
+// Never reached the server, so retrying can't apply a request twice
+const NOT_SENT = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+const netCode = (e: unknown) => {
+  const err = e as { name?: string; code?: string; cause?: { code?: string; name?: string } };
+  return err?.cause?.code ?? err?.code ?? (err?.name === 'TimeoutError' ? 'timeout' : err?.cause?.name);
+};
+
+/**
+ * fetch() that rides out brief network drops (DNS hiccups, resets, timeouts) with a few retries.
+ * Dropped/timed-out connections are only retried when `idempotent`, since the server may already have acted.
+ * `init` is a function so each attempt gets a fresh timeout signal.
+ */
+export async function fetchRetry(url: string | URL, init: () => RequestInit, opts: { idempotent?: boolean; tries?: number; delayMs?: number } = {}): Promise<Response> {
+  const tries = opts.tries ?? 4;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, init());
+    } catch (e) {
+      const code = netCode(e);
+      if (attempt < tries && ((code && NOT_SENT.has(code)) || opts.idempotent)) {
+        await new Promise((r) => setTimeout(r, (opts.delayMs ?? 2000) * 2 ** (attempt - 1)));
+        continue;
+      }
+      const cause = (e as { cause?: { message?: string } }).cause?.message;
+      throw new Error(`Network error reaching ${new URL(String(url)).host}: ${code ?? (e as Error).message}${cause && cause !== code ? ` (${cause})` : ''}${attempt > 1 ? `, after ${attempt} tries` : ''}`);
+    }
+  }
+}
